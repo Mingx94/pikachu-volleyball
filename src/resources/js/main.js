@@ -28,6 +28,10 @@
  *  - "ui.js": For the user interface (menu bar, buttons etc.) of the html page.
  */
 'use strict';
+// i18n must run before any @pixi/* import: it applies the Korean texture path
+// overrides on `ASSETS_PATH.TEXTURES` synchronously, before main.js queues
+// the spritesheet on the PixiJS Loader.
+import './i18n/index.js';
 import { settings } from '@pixi/settings';
 import { SCALE_MODES } from '@pixi/constants';
 import { Renderer, BatchRenderer, autoDetectRenderer } from '@pixi/core';
