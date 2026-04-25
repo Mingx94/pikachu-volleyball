@@ -26,26 +26,27 @@
  *  Player height: 64 = 0x40
  *
  */
+import { letComputerDecideUserInput } from './ai.js';
 import { rand } from './rand.js';
 
 /** ground width */
-const GROUND_WIDTH = 432;
+export const GROUND_WIDTH = 432;
 /** ground half-width, it is also the net pillar x coordinate */
 export const GROUND_HALF_WIDTH = (GROUND_WIDTH / 2) | 0; // integer division
 /** player (Pikachu) length: width = height = 64 */
-const PLAYER_LENGTH = 64;
+export const PLAYER_LENGTH = 64;
 /** player half length */
-const PLAYER_HALF_LENGTH = (PLAYER_LENGTH / 2) | 0; // integer division
+export const PLAYER_HALF_LENGTH = (PLAYER_LENGTH / 2) | 0; // integer division
 /** player's y coordinate when they are touching ground */
 const PLAYER_TOUCHING_GROUND_Y_COORD = 244;
 /** ball's radius */
-const BALL_RADIUS = 20;
+export const BALL_RADIUS = 20;
 /** ball's y coordinate when it is touching ground */
-const BALL_TOUCHING_GROUND_Y_COORD = 252;
+export const BALL_TOUCHING_GROUND_Y_COORD = 252;
 /** net pillar's half width (this value is on this physics engine only, not on the sprite pixel size) */
-const NET_PILLAR_HALF_WIDTH = 25;
+export const NET_PILLAR_HALF_WIDTH = 25;
 /** net pillar top's top side y coordinate */
-const NET_PILLAR_TOP_TOP_Y_COORD = 176;
+export const NET_PILLAR_TOP_TOP_Y_COORD = 176;
 /** net pillar top's bottom side y coordinate (this value is on this physics engine only) */
 const NET_PILLAR_TOP_BOTTOM_Y_COORD = 192;
 
@@ -54,12 +55,13 @@ const NET_PILLAR_TOP_BOTTOM_Y_COORD = 192;
  * This constant is not in the original machine code. (The original machine code does not limit the looping number.)
  *
  * In the original ball x coord range setting (ball x coord in [20, 432]), the infinite loops in
- * {@link calculateExpectedLandingPointXFor} function and {@link expectedLandingPointXWhenPowerHit} function seems to be always terminated soon.
+ * {@link calculateExpectedLandingPointXFor} function and the AI's expectedLandingPointXWhenPowerHit
+ * function seems to be always terminated soon.
  * But if the ball x coord range is edited, for example, to [20, 432 - 20] for left-right symmetry,
- * it is observed that the infinite loop in {@link expectedLandingPointXWhenPowerHit} does not terminate.
+ * it is observed that the infinite loop in expectedLandingPointXWhenPowerHit does not terminate.
  * So for safety, this infinite loop limit is included for the infinite loops mentioned above.
  */
-const INFINITE_LOOP_LIMIT = 1000;
+export const INFINITE_LOOP_LIMIT = 1000;
 
 interface PlayerSound {
   pipikachu: boolean;
@@ -132,7 +134,7 @@ export class PikaUserInput {
  *
  * For initial values: refer to FUN_000403a90 && FUN_00401f40
  */
-class Player {
+export class Player {
   /** Is this player on the right side? */
   isPlayer2: boolean; // 0xA0
   /** Is controlled by computer? */
@@ -241,7 +243,7 @@ class Player {
  *
  * For initial Values: refer to FUN_000403a90 && FUN_00402d60
  */
-class Ball {
+export class Ball {
   /** x coord of expected landing point */
   expectedLandingPointX = 0; // 0x40
   /**
@@ -785,230 +787,4 @@ function calculateExpectedLandingPointXFor(ball: Ball): void {
     copyBall.yVelocity += 1;
   }
   ball.expectedLandingPointX = copyBall.x;
-}
-
-/**
- * FUN_00402360
- * Computer controls its player by this function.
- * Computer decides the user input for the player it controls,
- * according to the game situation it figures out
- * by the given parameters (player, ball and theOtherPlayer),
- * and reflects these to the given user input object.
- *
- * @param player The player whom computer controls
- * @param ball ball
- * @param theOtherPlayer The other player
- * @param userInput user input of the player whom computer controls
- */
-function letComputerDecideUserInput(
-  player: Player,
-  ball: Ball,
-  theOtherPlayer: Player,
-  userInput: PikaUserInput,
-): void {
-  userInput.xDirection = 0;
-  userInput.yDirection = 0;
-  userInput.powerHit = 0;
-
-  let virtualExpectedLandingPointX = ball.expectedLandingPointX;
-  if (Math.abs(ball.x - player.x) > 100 && Math.abs(ball.xVelocity) < player.computerBoldness + 5) {
-    const leftBoundary = Number(player.isPlayer2) * GROUND_HALF_WIDTH;
-    if (
-      (ball.expectedLandingPointX <= leftBoundary ||
-        ball.expectedLandingPointX >=
-          Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
-      player.computerWhereToStandBy === 0
-    ) {
-      // If conditions above met, the computer estimates the proper location to stay as the middle point of their side
-      virtualExpectedLandingPointX = leftBoundary + ((GROUND_HALF_WIDTH / 2) | 0);
-    }
-  }
-
-  if (Math.abs(virtualExpectedLandingPointX - player.x) > player.computerBoldness + 8) {
-    if (player.x < virtualExpectedLandingPointX) {
-      userInput.xDirection = 1;
-    } else {
-      userInput.xDirection = -1;
-    }
-  } else if (rand() % 20 === 0) {
-    player.computerWhereToStandBy = rand() % 2;
-  }
-
-  if (player.state === 0) {
-    if (
-      Math.abs(ball.xVelocity) < player.computerBoldness + 3 &&
-      Math.abs(ball.x - player.x) < PLAYER_HALF_LENGTH &&
-      ball.y > -36 &&
-      ball.y < 10 * player.computerBoldness + 84 &&
-      ball.yVelocity > 0
-    ) {
-      userInput.yDirection = -1;
-    }
-
-    const leftBoundary = Number(player.isPlayer2) * GROUND_HALF_WIDTH;
-    const rightBoundary = (Number(player.isPlayer2) + 1) * GROUND_HALF_WIDTH;
-    if (
-      ball.expectedLandingPointX > leftBoundary &&
-      ball.expectedLandingPointX < rightBoundary &&
-      Math.abs(ball.x - player.x) > player.computerBoldness * 5 + PLAYER_LENGTH &&
-      ball.x > leftBoundary &&
-      ball.x < rightBoundary &&
-      ball.y > 174
-    ) {
-      // If conditions above met, the computer decides to dive!
-      userInput.powerHit = 1;
-      if (player.x < ball.x) {
-        userInput.xDirection = 1;
-      } else {
-        userInput.xDirection = -1;
-      }
-    }
-  } else if (player.state === 1 || player.state === 2) {
-    if (Math.abs(ball.x - player.x) > 8) {
-      if (player.x < ball.x) {
-        userInput.xDirection = 1;
-      } else {
-        userInput.xDirection = -1;
-      }
-    }
-    if (Math.abs(ball.x - player.x) < 48 && Math.abs(ball.y - player.y) < 48) {
-      const willInputPowerHit = decideWhetherInputPowerHit(player, ball, theOtherPlayer, userInput);
-      if (willInputPowerHit === true) {
-        userInput.powerHit = 1;
-        if (Math.abs(theOtherPlayer.x - player.x) < 80 && userInput.yDirection !== -1) {
-          userInput.yDirection = -1;
-        }
-      }
-    }
-  }
-}
-
-/**
- * FUN_00402630
- * This function is called by {@link letComputerDecideUserInput},
- * and also sets x and y direction user input so that it participate in
- * the decision of the direction of power hit.
- *
- * @return Will input power hit?
- */
-function decideWhetherInputPowerHit(
-  player: Player,
-  ball: Ball,
-  theOtherPlayer: Player,
-  userInput: PikaUserInput,
-): boolean {
-  if (rand() % 2 === 0) {
-    for (let xDirection = 1; xDirection > -1; xDirection--) {
-      for (let yDirection = -1; yDirection < 2; yDirection++) {
-        const expectedLandingPointX = expectedLandingPointXWhenPowerHit(
-          xDirection,
-          yDirection,
-          ball,
-        );
-        if (
-          (expectedLandingPointX <= Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
-            expectedLandingPointX >= Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
-          Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH
-        ) {
-          userInput.xDirection = xDirection;
-          userInput.yDirection = yDirection;
-          return true;
-        }
-      }
-    }
-  } else {
-    for (let xDirection = 1; xDirection > -1; xDirection--) {
-      for (let yDirection = 1; yDirection > -2; yDirection--) {
-        const expectedLandingPointX = expectedLandingPointXWhenPowerHit(
-          xDirection,
-          yDirection,
-          ball,
-        );
-        if (
-          (expectedLandingPointX <= Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
-            expectedLandingPointX >= Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
-          Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH
-        ) {
-          userInput.xDirection = xDirection;
-          userInput.yDirection = yDirection;
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-/**
- * FUN_00402870
- * This function is called by {@link decideWhetherInputPowerHit},
- * and calculates the expected x coordinate of the landing point of the ball
- * when power hit
- *
- * @return x coord of expected landing point when power hit the ball
- */
-function expectedLandingPointXWhenPowerHit(
-  userInputXDirection: number,
-  userInputYDirection: number,
-  ball: Ball,
-): number {
-  const copyBall = {
-    x: ball.x,
-    y: ball.y,
-    xVelocity: ball.xVelocity,
-    yVelocity: ball.yVelocity,
-  };
-  if (copyBall.x < GROUND_HALF_WIDTH) {
-    copyBall.xVelocity = (Math.abs(userInputXDirection) + 1) * 10;
-  } else {
-    copyBall.xVelocity = -(Math.abs(userInputXDirection) + 1) * 10;
-  }
-  copyBall.yVelocity = Math.abs(copyBall.yVelocity) * userInputYDirection * 2;
-
-  let loopCounter = 0;
-  while (true) {
-    loopCounter++;
-
-    const futureCopyBallX = copyBall.x + copyBall.xVelocity;
-    if (futureCopyBallX < BALL_RADIUS || futureCopyBallX > GROUND_WIDTH) {
-      copyBall.xVelocity = -copyBall.xVelocity;
-    }
-    if (copyBall.y + copyBall.yVelocity < 0) {
-      copyBall.yVelocity = 1;
-    }
-    if (
-      Math.abs(copyBall.x - GROUND_HALF_WIDTH) < NET_PILLAR_HALF_WIDTH &&
-      copyBall.y > NET_PILLAR_TOP_TOP_Y_COORD
-    ) {
-      /*
-        The code below maybe is intended to make computer do mistakes.
-        The player controlled by computer occasionally power hit ball that is bounced back by the net pillar,
-        since code below do not anticipate the bounce back.
-      */
-      if (copyBall.yVelocity > 0) {
-        copyBall.yVelocity = -copyBall.yVelocity;
-      }
-      /*
-      An alternative code for making the computer not do those mistakes is as below.
-
-      if (copyBall.y <= NET_PILLAR_TOP_BOTTOM_Y_COORD) {
-        if (copyBall.yVelocity > 0) {
-          copyBall.yVelocity = -copyBall.yVelocity;
-        }
-      } else {
-        if (copyBall.x < GROUND_HALF_WIDTH) {
-          copyBall.xVelocity = -Math.abs(copyBall.xVelocity);
-        } else {
-          copyBall.xVelocity = Math.abs(copyBall.xVelocity);
-        }
-      }
-      */
-    }
-    copyBall.y = copyBall.y + copyBall.yVelocity;
-    if (copyBall.y > BALL_TOUCHING_GROUND_Y_COORD || loopCounter >= INFINITE_LOOP_LIMIT) {
-      return copyBall.x;
-    }
-    copyBall.x = copyBall.x + copyBall.xVelocity;
-    copyBall.yVelocity += 1;
-  }
 }
