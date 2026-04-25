@@ -1,27 +1,103 @@
 /**
  * The Controller part in MVC pattern
  */
-'use strict';
+import type { Container } from '@pixi/display';
+import type { LoaderResource } from '@pixi/loaders';
 import { GROUND_HALF_WIDTH, PikaPhysics } from './physics.js';
 import { MenuView, GameView, FadeInOut, IntroView } from './view.js';
 import { PikaKeyboard } from './keyboard.js';
 import { PikaAudio } from './audio.js';
 
-/** @typedef {import('@pixi/display').Container} Container */
-/** @typedef {import('@pixi/loaders').LoaderResource} LoaderResource */
+export type GameState = () => void;
 
-/** @typedef GameState @type {function():void} */
+interface FrameTotal {
+  intro: number;
+  afterMenuSelection: number;
+  beforeStartOfNewGame: number;
+  startOfNewGame: number;
+  afterEndOfRound: number;
+  beforeStartOfNextRound: number;
+  gameEnd: number;
+}
+
+interface NoInputFrameTotal {
+  menu: number;
+}
+
+interface PikaVolleyView {
+  intro: IntroView;
+  menu: MenuView;
+  game: GameView;
+  fadeInOut: FadeInOut;
+}
 
 /**
  * Class representing Pikachu Volleyball game
  */
 export class PikachuVolleyball {
+  view: PikaVolleyView;
+  audio: PikaAudio;
+  physics: PikaPhysics;
+  keyboardArray: [PikaKeyboard, PikaKeyboard];
+
+  /** game fps */
+  normalFPS = 25;
+  /** fps for slow motion */
+  slowMotionFPS = 5;
+
+  /** number of frames for slow motion */
+  readonly SLOW_MOTION_FRAMES_NUM = 6;
+  /** number of frames left for slow motion */
+  slowMotionFramesLeft = 0;
+  /** number of elapsed normal fps frames for rendering slow motion */
+  slowMotionNumOfSkippedFrames = 0;
+
+  /** 0: with computer, 1: with friend */
+  selectedWithWho = 0;
+
+  /** [0] for player 1 score, [1] for player 2 score */
+  scores: [number, number] = [0, 0];
+  /** winning score: if either one of the players reaches this score, game ends */
+  winningScore = 15;
+
+  gameEnded = false;
+  roundEnded = false;
+  isPlayer2Serve = false;
+
+  /** frame counter */
+  frameCounter = 0;
+  /** total number of frames for each game state */
+  frameTotal: FrameTotal = {
+    intro: 165,
+    afterMenuSelection: 15,
+    beforeStartOfNewGame: 15,
+    startOfNewGame: 71,
+    afterEndOfRound: 5,
+    beforeStartOfNextRound: 30,
+    gameEnd: 211,
+  };
+
+  /** counter for frames while there is no input from keyboard */
+  noInputFrameCounter = 0;
+  /** total number of frames to be rendered while there is no input */
+  noInputFrameTotal: NoInputFrameTotal = {
+    menu: 225,
+  };
+
+  paused = false;
+  isStereoSound = true;
+
+  private _isPracticeMode = false;
+
+  /** The game state which is being rendered now */
+  state: GameState;
+
   /**
    * Create a Pikachu Volleyball game which includes physics, view, audio
-   * @param {Container} stage container which is rendered by PIXI.Renderer or PIXI.CanvasRenderer
-   * @param {Object.<string,LoaderResource>} resources resources property of the PIXI.Loader object which is used for loading the game resources
+   * @param stage container which is rendered by PIXI.Renderer or PIXI.CanvasRenderer
+   * @param resources resources property of the PIXI.Loader object which is used for loading the game resources
    */
-  constructor(stage, resources) {
+  constructor(stage: Container, resources: Record<string, LoaderResource>) {
     this.view = {
       intro: new IntroView(resources),
       menu: new MenuView(resources),
@@ -41,75 +117,16 @@ export class PikachuVolleyball {
     this.physics = new PikaPhysics(true, true);
     this.keyboardArray = [
       new PikaKeyboard('KeyD', 'KeyG', 'KeyR', 'KeyV', 'KeyZ', 'KeyF'), // for player1
-      new PikaKeyboard( // for player2
+      new PikaKeyboard(
+        // for player2
         'ArrowLeft',
         'ArrowRight',
         'ArrowUp',
         'ArrowDown',
-        'Enter'
+        'Enter',
       ),
     ];
 
-    /** @type {number} game fps */
-    this.normalFPS = 25;
-    /** @type {number} fps for slow motion */
-    this.slowMotionFPS = 5;
-
-    /** @constant @type {number} number of frames for slow motion */
-    this.SLOW_MOTION_FRAMES_NUM = 6;
-    /** @type {number} number of frames left for slow motion */
-    this.slowMotionFramesLeft = 0;
-    /** @type {number} number of elapsed normal fps frames for rendering slow motion */
-    this.slowMotionNumOfSkippedFrames = 0;
-
-    /** @type {number} 0: with computer, 1: with friend */
-    this.selectedWithWho = 0;
-
-    /** @type {number[]} [0] for player 1 score, [1] for player 2 score */
-    this.scores = [0, 0];
-    /** @type {number} winning score: if either one of the players reaches this score, game ends */
-    this.winningScore = 15;
-
-    /** @type {boolean} Is the game ended? */
-    this.gameEnded = false;
-    /** @type {boolean} Is the round ended? */
-    this.roundEnded = false;
-    /** @type {boolean} Will player 2 serve? */
-    this.isPlayer2Serve = false;
-
-    /** @type {number} frame counter */
-    this.frameCounter = 0;
-    /** @type {Object.<string,number>} total number of frames for each game state */
-    this.frameTotal = {
-      intro: 165,
-      afterMenuSelection: 15,
-      beforeStartOfNewGame: 15,
-      startOfNewGame: 71,
-      afterEndOfRound: 5,
-      beforeStartOfNextRound: 30,
-      gameEnd: 211,
-    };
-
-    /** @type {number} counter for frames while there is no input from keyboard */
-    this.noInputFrameCounter = 0;
-    /** @type {Object.<string,number>} total number of frames to be rendered while there is no input */
-    this.noInputFrameTotal = {
-      menu: 225,
-    };
-
-    /** @type {boolean} true: paused, false: not paused */
-    this.paused = false;
-
-    /** @type {boolean} true: stereo, false: mono */
-    this.isStereoSound = true;
-
-    /** @type {boolean} true: practice mode on, false: practice mode off */
-    this._isPracticeMode = false;
-
-    /**
-     * The game state which is being rendered now
-     * @type {GameState}
-     */
     this.state = this.intro;
   }
 
@@ -117,15 +134,14 @@ export class PikachuVolleyball {
    * Game loop
    * This function should be called at regular intervals ( interval = (1 / FPS) second )
    */
-  gameLoop() {
+  gameLoop(): void {
     if (this.paused === true) {
       return;
     }
     if (this.slowMotionFramesLeft > 0) {
       this.slowMotionNumOfSkippedFrames++;
       if (
-        this.slowMotionNumOfSkippedFrames %
-          Math.round(this.normalFPS / this.slowMotionFPS) !==
+        this.slowMotionNumOfSkippedFrames % Math.round(this.normalFPS / this.slowMotionFPS) !==
         0
       ) {
         return;
@@ -139,11 +155,8 @@ export class PikachuVolleyball {
     this.state();
   }
 
-  /**
-   * Intro: a man with a brief case
-   * @type {GameState}
-   */
-  intro() {
+  /** Intro: a man with a brief case */
+  intro(): void {
     if (this.frameCounter === 0) {
       this.view.intro.visible = true;
       this.view.fadeInOut.setBlackAlphaTo(0);
@@ -152,10 +165,7 @@ export class PikachuVolleyball {
     this.view.intro.drawMark(this.frameCounter);
     this.frameCounter++;
 
-    if (
-      this.keyboardArray[0].powerHit === 1 ||
-      this.keyboardArray[1].powerHit === 1
-    ) {
+    if (this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1) {
       this.frameCounter = 0;
       this.view.intro.visible = false;
       this.state = this.menu;
@@ -168,11 +178,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Menu: select who do you want to play. With computer? With friend?
-   * @type {GameState}
-   */
-  menu() {
+  /** Menu: select who do you want to play. With computer? With friend? */
+  menu(): void {
     if (this.frameCounter === 0) {
       this.view.menu.visible = true;
       this.view.fadeInOut.setBlackAlphaTo(0);
@@ -189,8 +196,7 @@ export class PikachuVolleyball {
 
     if (
       this.frameCounter < 71 &&
-      (this.keyboardArray[0].powerHit === 1 ||
-        this.keyboardArray[1].powerHit === 1)
+      (this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1)
     ) {
       this.frameCounter = 71;
       return;
@@ -201,8 +207,7 @@ export class PikachuVolleyball {
     }
 
     if (
-      (this.keyboardArray[0].yDirection === -1 ||
-        this.keyboardArray[1].yDirection === -1) &&
+      (this.keyboardArray[0].yDirection === -1 || this.keyboardArray[1].yDirection === -1) &&
       this.selectedWithWho === 1
     ) {
       this.noInputFrameCounter = 0;
@@ -210,8 +215,7 @@ export class PikachuVolleyball {
       this.view.menu.selectWithWho(this.selectedWithWho);
       this.audio.sounds.pi.play();
     } else if (
-      (this.keyboardArray[0].yDirection === 1 ||
-        this.keyboardArray[1].yDirection === 1) &&
+      (this.keyboardArray[0].yDirection === 1 || this.keyboardArray[1].yDirection === 1) &&
       this.selectedWithWho === 0
     ) {
       this.noInputFrameCounter = 0;
@@ -222,10 +226,7 @@ export class PikachuVolleyball {
       this.noInputFrameCounter++;
     }
 
-    if (
-      this.keyboardArray[0].powerHit === 1 ||
-      this.keyboardArray[1].powerHit === 1
-    ) {
+    if (this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1) {
       if (this.selectedWithWho === 1) {
         this.physics.player1.isComputer = false;
         this.physics.player2.isComputer = false;
@@ -254,11 +255,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Fade out after menu selection
-   * @type {GameState}
-   */
-  afterMenuSelection() {
+  /** Fade out after menu selection */
+  afterMenuSelection(): void {
     this.view.fadeInOut.changeBlackAlphaBy(1 / 16);
     this.frameCounter++;
     if (this.frameCounter >= this.frameTotal.afterMenuSelection) {
@@ -267,11 +265,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Delay before start of new game (This is for the delay that exist in the original game)
-   * @type {GameState}
-   */
-  beforeStartOfNewGame() {
+  /** Delay before start of new game (This is for the delay that exist in the original game) */
+  beforeStartOfNewGame(): void {
     this.frameCounter++;
     if (this.frameCounter >= this.frameTotal.beforeStartOfNewGame) {
       this.frameCounter = 0;
@@ -280,11 +275,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Start of new game: Initialize ball and players and print game start message
-   * @type {GameState}
-   */
-  startOfNewGame() {
+  /** Start of new game: Initialize ball and players and print game start message */
+  startOfNewGame(): void {
     if (this.frameCounter === 0) {
       this.view.game.visible = true;
       this.gameEnded = false;
@@ -308,10 +300,7 @@ export class PikachuVolleyball {
       this.audio.sounds.bgm.play();
     }
 
-    this.view.game.drawGameStartMessage(
-      this.frameCounter,
-      this.frameTotal.startOfNewGame
-    );
+    this.view.game.drawGameStartMessage(this.frameCounter, this.frameTotal.startOfNewGame);
     this.view.game.drawCloudsAndWave();
     this.view.fadeInOut.changeBlackAlphaBy(-(1 / 17)); // fade in
     this.frameCounter++;
@@ -323,14 +312,10 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Round: the players play volleyball in this game state
-   * @type {GameState}
-   */
-  round() {
+  /** Round: the players play volleyball in this game state */
+  round(): void {
     const pressedPowerHit =
-      this.keyboardArray[0].powerHit === 1 ||
-      this.keyboardArray[1].powerHit === 1;
+      this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1;
 
     if (
       this.physics.player1.isComputer === true &&
@@ -343,9 +328,7 @@ export class PikachuVolleyball {
       return;
     }
 
-    const isBallTouchingGround = this.physics.runEngineForNextFrame(
-      this.keyboardArray
-    );
+    const isBallTouchingGround = this.physics.runEngineForNextFrame(this.keyboardArray);
 
     this.playSoundEffect();
     this.view.game.drawPlayersAndBall(this.physics);
@@ -408,11 +391,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Fade out after end of round
-   * @type {GameState}
-   */
-  afterEndOfRound() {
+  /** Fade out after end of round */
+  afterEndOfRound(): void {
     this.view.fadeInOut.changeBlackAlphaBy(1 / 16);
     this.frameCounter++;
     if (this.frameCounter >= this.frameTotal.afterEndOfRound) {
@@ -421,11 +401,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Before start of next round, initialize ball and players, and print ready message
-   * @type {GameState}
-   */
-  beforeStartOfNextRound() {
+  /** Before start of next round, initialize ball and players, and print ready message */
+  beforeStartOfNextRound(): void {
     if (this.frameCounter === 0) {
       this.view.fadeInOut.setBlackAlphaTo(1);
       this.view.game.drawReadyMessage(false);
@@ -453,13 +430,11 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Play sound effect on {@link round}
-   */
-  playSoundEffect() {
+  /** Play sound effect on {@link round} */
+  playSoundEffect(): void {
     const audio = this.audio;
     for (let i = 0; i < 2; i++) {
-      const player = this.physics[`player${i + 1}`];
+      const player = i === 0 ? this.physics.player1 : this.physics.player2;
       const sound = player.sound;
       let leftOrCenterOrRight = 0;
       if (this.isStereoSound) {
@@ -498,10 +473,8 @@ export class PikachuVolleyball {
     }
   }
 
-  /**
-   * Called if restart button clicked
-   */
-  restart() {
+  /** Called if restart button clicked */
+  restart(): void {
     this.frameCounter = 0;
     this.noInputFrameCounter = 0;
     this.slowMotionFramesLeft = 0;
@@ -511,15 +484,11 @@ export class PikachuVolleyball {
     this.state = this.intro;
   }
 
-  /** @return {boolean} */
-  get isPracticeMode() {
+  get isPracticeMode(): boolean {
     return this._isPracticeMode;
   }
 
-  /**
-   * @param {boolean} bool true: turn on practice mode, false: turn off practice mode
-   */
-  set isPracticeMode(bool) {
+  set isPracticeMode(bool: boolean) {
     this._isPracticeMode = bool;
     this.view.game.scoreBoards[0].visible = !bool;
     this.view.game.scoreBoards[1].visible = !bool;

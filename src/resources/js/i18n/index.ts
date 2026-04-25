@@ -7,67 +7,66 @@
  * Supported locales: en, ko, zh
  *
  * Korean texture overrides are applied here (synchronously, at module load)
- * so they take effect before main.js queues the spritesheet on the PixiJS Loader.
- * For this reason, main.js MUST import this module before the @pixi/* sub-packages.
+ * so they take effect before main.ts queues the spritesheet on the PixiJS Loader.
+ * For this reason, main.ts MUST import this module before the @pixi/* sub-packages.
  */
-'use strict';
 
 import { ASSETS_PATH } from '../assets_path.js';
 import { translations } from './translations.js';
+import type { Locale } from './translations.js';
 
-const SUPPORTED = ['en', 'ko', 'zh'];
+const SUPPORTED: readonly Locale[] = ['en', 'ko', 'zh'];
 
-/** @returns {'en' | 'ko' | 'zh'} */
-function detectLocale() {
-  const fromUrl = new URLSearchParams(location.search).get('lang');
-  if (SUPPORTED.includes(fromUrl)) return /** @type {any} */ (fromUrl);
-  const fromStorage = localStorage.getItem('pv-locale');
-  if (SUPPORTED.includes(fromStorage)) return /** @type {any} */ (fromStorage);
+function asLocale(value: string | null): Locale | null {
+  if (value === null) return null;
+  if ((SUPPORTED as readonly string[]).includes(value)) return value as Locale;
+  return null;
+}
+
+function detectLocale(): Locale {
+  const fromUrl = asLocale(new URLSearchParams(location.search).get('lang'));
+  if (fromUrl !== null) return fromUrl;
+  const fromStorage = asLocale(localStorage.getItem('pv-locale'));
+  if (fromStorage !== null) return fromStorage;
   const nav = (navigator.language || 'en').toLowerCase();
   if (nav.startsWith('ko')) return 'ko';
   if (nav.startsWith('zh')) return 'zh';
   return 'en';
 }
 
-export const currentLocale = detectLocale();
+export const currentLocale: Locale = detectLocale();
 
 if (currentLocale === 'ko') {
-  Object.assign(ASSETS_PATH.TEXTURES, {
-    MARK: 'messages/ko/mark.png',
-    POKEMON: 'messages/ko/pokemon.png',
-    PIKACHU_VOLLEYBALL: 'messages/ko/pikachu_volleyball.png',
-    FIGHT: 'messages/ko/fight.png',
-    WITH_COMPUTER: 'messages/ko/with_computer.png',
-    WITH_FRIEND: 'messages/ko/with_friend.png',
-    GAME_START: 'messages/ko/game_start.png',
-  });
+  ASSETS_PATH.TEXTURES.MARK = 'messages/ko/mark.png';
+  ASSETS_PATH.TEXTURES.POKEMON = 'messages/ko/pokemon.png';
+  ASSETS_PATH.TEXTURES.PIKACHU_VOLLEYBALL = 'messages/ko/pikachu_volleyball.png';
+  ASSETS_PATH.TEXTURES.FIGHT = 'messages/ko/fight.png';
+  ASSETS_PATH.TEXTURES.WITH_COMPUTER = 'messages/ko/with_computer.png';
+  ASSETS_PATH.TEXTURES.WITH_FRIEND = 'messages/ko/with_friend.png';
+  ASSETS_PATH.TEXTURES.GAME_START = 'messages/ko/game_start.png';
 }
 
 /**
  * Look up a translation for the current locale, falling back to English then to the key itself.
- * @param {string} key
- * @returns {string}
  */
-export function t(key) {
-  const localeTable = translations[currentLocale];
-  if (localeTable && key in localeTable) return localeTable[key];
-  if (key in translations.en) return translations.en[key];
-  return key;
+export function t(key: string): string {
+  return translations[currentLocale][key] ?? translations.en[key] ?? key;
 }
 
 /**
  * Replace text/HTML/attributes for every element under `root` that carries a
  * `data-i18n`, `data-i18n-html`, or `data-i18n-attr` attribute.
- * @param {ParentNode} [root]
  */
-export function applyTranslations(root = document) {
+export function applyTranslations(root: ParentNode = document): void {
   document.documentElement.lang = currentLocale;
 
   for (const el of root.querySelectorAll('[data-i18n]')) {
-    el.textContent = t(el.getAttribute('data-i18n'));
+    const key = el.getAttribute('data-i18n');
+    if (key !== null) el.textContent = t(key);
   }
   for (const el of root.querySelectorAll('[data-i18n-html]')) {
-    el.innerHTML = t(el.getAttribute('data-i18n-html'));
+    const key = el.getAttribute('data-i18n-html');
+    if (key !== null) el.innerHTML = t(key);
   }
   for (const el of root.querySelectorAll('[data-i18n-attr]')) {
     const spec = el.getAttribute('data-i18n-attr') || '';
@@ -84,36 +83,34 @@ export function applyTranslations(root = document) {
 /**
  * Switch language. Persists the choice and reloads the page (with `?lang=`)
  * so that texture overrides and translations are applied from a clean slate.
- * @param {string} locale
  */
-export function setLocale(locale) {
-  if (!SUPPORTED.includes(locale) || locale === currentLocale) return;
-  localStorage.setItem('pv-locale', locale);
+export function setLocale(locale: string): void {
+  const target = asLocale(locale);
+  if (target === null || target === currentLocale) return;
+  localStorage.setItem('pv-locale', target);
   const url = new URL(location.href);
-  url.searchParams.set('lang', locale);
+  url.searchParams.set('lang', target);
   location.href = url.toString();
 }
 
 /**
  * Wire up `[data-locale]` buttons inside `.languages` containers and mark the
  * button matching `currentLocale` with a leading check mark + `current` class.
- * @param {ParentNode} [root]
  */
-export function setupLanguageButtons(root = document) {
-  for (const btn of root.querySelectorAll('button.lang-btn[data-locale]')) {
+export function setupLanguageButtons(root: ParentNode = document): void {
+  for (const btn of root.querySelectorAll<HTMLButtonElement>('button.lang-btn[data-locale]')) {
     const locale = btn.getAttribute('data-locale');
     if (locale === currentLocale) {
       btn.classList.add('current');
-      // @ts-ignore — HTMLButtonElement.disabled
       btn.disabled = true;
-      btn.textContent = '✓ ' + btn.textContent.trim();
-    } else {
+      btn.textContent = '✓ ' + (btn.textContent ?? '').trim();
+    } else if (locale !== null) {
       btn.addEventListener('click', () => setLocale(locale));
     }
   }
 }
 
-function init() {
+function init(): void {
   applyTranslations();
   setupLanguageButtons();
 }

@@ -11,12 +11,14 @@
  * Strings here are static, hand-authored content (not user input), so
  * innerHTML insertion is safe.
  */
-'use strict';
+
+export type Locale = 'en' | 'ko' | 'zh';
+export type TranslationTable = Record<string, string>;
 
 const ARROW = ' ▶︎'; // "▶︎" trailing the submenu labels in HTML
 const TAG = '対戦ぴかちゅ～　ﾋﾞｰﾁﾊﾞﾚｰ編'; // 対戦ぴかちゅ～ ﾋﾞｰﾁﾊﾞﾚｰ編
 
-export const translations = {
+export const translations: Record<Locale, TranslationTable> = {
   en: {
     // <html lang> / meta
     'meta.title': 'Pikachu Volleyball',
@@ -94,8 +96,7 @@ export const translations = {
     'about.tip2_html':
       'Player 1 has the "V" key as an additional down key. The "V" key works differently compared to the "F" key, so you can try using it. (<span class="no-wrap"><a href="https://twitter.com/repeat_c/status/1256494157884841984" target="_blank" rel="noopener">Thanks to @repeat_c</a></span>, this characteristic of the original game could be reflected in this web version.)',
     'about.tip3_label': 'Tip 3:',
-    'about.tip3_html':
-      'If you want to hide/show the game menu bar, press the Esc key.',
+    'about.tip3_html': 'If you want to hide/show the game menu bar, press the Esc key.',
     'about.tip4_label': 'Tip 4:',
     'about.tip4_html':
       'I\'ve added a practice mode which is not in the original game, you can turn on this mode at <span class="no_wrap">"Options → Practice mode → on"</span>.',
@@ -198,7 +199,7 @@ export const translations = {
 
     'about.screenshot_alt': 'Pikachu Volleyball game screenshot',
     'about.intro1':
-      '피카츄 배구는 일본에서 1997년에 만들어진 윈도우용 게임입니다. 이 게임을 처음 접한 건 아마 초등학교 컴퓨터실에서였던 것으로 기억합니다. 친구들과 같이하면 정말 재미있지요. 어떤 분이 일본어 스프라이트를 한국어로 번역한 \'피카츄 버전 한글판\'이 나오기도 했습니다. (이 \'피카츄 버전 한글판\'의 한국어 스프라이트를 이 한국어 웹 버전에서도 사용했습니다.)',
+      "피카츄 배구는 일본에서 1997년에 만들어진 윈도우용 게임입니다. 이 게임을 처음 접한 건 아마 초등학교 컴퓨터실에서였던 것으로 기억합니다. 친구들과 같이하면 정말 재미있지요. 어떤 분이 일본어 스프라이트를 한국어로 번역한 '피카츄 버전 한글판'이 나오기도 했습니다. (이 '피카츄 버전 한글판'의 한국어 스프라이트를 이 한국어 웹 버전에서도 사용했습니다.)",
     'about.intro2':
       '이 웹 버전은 원조 피카츄 배구 게임을 리버스 엔지니어링하여 이를 자바스크립트 코드로 구현한 것입니다. 이 웹 버전 게임은 웹 브라우저 상에서 직접 돌아가기 때문에 컴퓨터 운영체제에 상관 없이 플레이할 수 있습니다.',
     'about.controls_label': '조작법:',
@@ -214,8 +215,7 @@ export const translations = {
     'about.tip2_html':
       '왼쪽 피카츄(1P)의 경우 아래 방향키로 "V" 키가 추가로 있습니다. "V" 키는 "F" 키와 작동 방식에 차이가 있으므로, 직접 사용해볼 수 있습니다. (<span class="no-wrap"><a href="https://twitter.com/repeat_c/status/1256494157884841984" target="_blank" rel="noopener">@repeat_c님의 제보</a></span> 덕분에, 원조 게임의 이 특성을 이 웹 버전에 반영할 수 있었습니다.)',
     'about.tip3_label': '팁 3:',
-    'about.tip3_html':
-      '메뉴 바를 숨기려면 (또는 다시 보이게 하려면), Esc 키를 누르면 됩니다.',
+    'about.tip3_html': '메뉴 바를 숨기려면 (또는 다시 보이게 하려면), Esc 키를 누르면 됩니다.',
     'about.tip4_label': '팁 4:',
     'about.tip4_html':
       '원조 피카츄 배구에는 없는 "연습모드"를 추가했습니다. <span class="no_wrap">"설정 → 연습모드 → 켜기"</span>를 누르면 활성화가 됩니다.',
@@ -229,15 +229,11 @@ export const translations = {
       '연습모드에서 승리점수를 바꾸는 건 의미가 없습니다.<br>연습모드를 끄려면 <span class="no_wrap">"설정 → 연습모드 → 끄기"</span>를 눌러주세요.',
     'notice.ok': '알겠어요',
 
-    'loading.message':
-      '게임 스프라이트/사운드 로드 중...',
+    'loading.message': '게임 스프라이트/사운드 로드 중...',
 
-    'update.message':
-      '새 버전이 나왔습니다. 지금 업데이트할까요?',
-    'update.now':
-      '지금 업데이트 (게임 상태가 초기화됩니다)',
-    'update.later':
-      '나중에 (브라우저 다시 켤 때 자동 업데이트)',
+    'update.message': '새 버전이 나왔습니다. 지금 업데이트할까요?',
+    'update.now': '지금 업데이트 (게임 상태가 초기화됩니다)',
+    'update.later': '나중에 (브라우저 다시 켤 때 자동 업데이트)',
 
     'embedded.message_html':
       '타 사이트 상에서 피카츄 배구 웹 버전을 실행하고 있는 것 같습니다. 다음 주소로 직접 방문하면 광고 없는 쾌적한 환경에서 플레이할 수 있습니다.',
@@ -248,10 +244,8 @@ export const translations = {
     'history.description': 'Update history for Pikachu Volleyball P2P Online',
     'history.heading_main': '피카츄 배구',
     'history.heading_sub': '업데이트 기록',
-    'history.back_html':
-      '<a href="../">오프라인 웹 버전</a>으로 돌아가기',
-    'history.only_major':
-      '주요 업데이트만 기록합니다.',
+    'history.back_html': '<a href="../">오프라인 웹 버전</a>으로 돌아가기',
+    'history.only_major': '주요 업데이트만 기록합니다.',
     'history.entries_html':
       '<p><span class="bold">2020-03-26</span> 공개</p>' +
       '<p><span class="bold">2020-04-19</span> 오프라인 웹 버전 변경 반영: 피카츄 다이빙 방향 오류 수정 (<a href="https://github.com/gorisanson/pikachu-volleyball/pull/1" target="_blank" rel="noopener"><span class="no-wrap">@djsjukr</span>님이 수정함</a>)</p>' +
@@ -314,8 +308,7 @@ export const translations = {
     'about.source_code_html':
       '你可以前往<a href="https://github.com/gorisanson/pikachu-volleyball" target="_blank" rel="noopener">GitHub</a>檢視原始碼',
     'about.release_date': '釋出日期: 2020-03-26',
-    'about.update_history_link_html':
-      '<a href="./update-history/" target="_self">更新紀錄</a>',
+    'about.update_history_link_html': '<a href="./update-history/" target="_self">更新紀錄</a>',
 
     'about.screenshot_alt': '皮卡丘打排球之遊戲截圖',
     'about.intro1':
@@ -325,8 +318,7 @@ export const translations = {
     'about.controls_label': 'Controls:',
     'about.controls_image_src': 'resources/assets/images/controls.png',
     'about.controls_alt': 'game controls',
-    'about.controls_note':
-      '如果你有藍牙鍵盤，你也可以嘗試在觸控/行動裝置上遊玩。',
+    'about.controls_note': '如果你有藍牙鍵盤，你也可以嘗試在觸控/行動裝置上遊玩。',
 
     'about.tip1_label': '小提示 1:',
     'about.tip1_html':
@@ -335,8 +327,7 @@ export const translations = {
     'about.tip2_html':
       '1P可以透過「V鍵」來當作額外的下鍵。「V鍵」與原先的「F鍵」略有不同，你可以嘗試看看使用它。 (<span class="no-wrap"><a href="https://twitter.com/repeat_c/status/1256494157884841984" target="_blank" rel="noopener">特別感謝 @repeat_c 告知</a></span>，此原遊戲之特點能在本線上版中呈現。)',
     'about.tip3_label': '小提示 3:',
-    'about.tip3_html':
-      '如果你想 隱藏/顯示 遊戲選單控制列，請按下「Esc鍵」。',
+    'about.tip3_html': '如果你想 隱藏/顯示 遊戲選單控制列，請按下「Esc鍵」。',
     'about.tip4_label': '小提示 4:',
     'about.tip4_html':
       '我增加了原始遊戲中沒有的練習模式，你可以透過 <span class="no_wrap">"選項 → 練習模式 → 開"</span> 開啟練習模式。',
@@ -353,10 +344,8 @@ export const translations = {
     'loading.message': '載入遊戲資源中...',
 
     'update.message': '有新版本釋出。是否更新？',
-    'update.now':
-      '現在更新 (將會失去當前的遊戲狀態)',
-    'update.later':
-      '待會再說 (於瀏覽器重開後自動更新)',
+    'update.now': '現在更新 (將會失去當前的遊戲狀態)',
+    'update.later': '待會再說 (於瀏覽器重開後自動更新)',
 
     'embedded.message_html':
       'It seems that you are playing this web version of <span class="no-wrap">Pikachu Volleyball</span> in some foreign website. If you visit the following link directly, you can play the game in a pleasant environment without ads.',
@@ -364,12 +353,10 @@ export const translations = {
       'The original address of this web version of Pikachu Volleyball:<br><a href="https://gorisanson.github.io/pikachu-volleyball/" target="_blank" rel="noopener">https://gorisanson.github.io/pikachu-volleyball/</a>',
 
     'history.title': '皮卡丘打排球更新紀錄',
-    'history.description':
-      '線上玩皮卡丘打排球之更新紀錄',
+    'history.description': '線上玩皮卡丘打排球之更新紀錄',
     'history.heading_main': '皮卡丘打排球',
     'history.heading_sub': '更新紀錄',
-    'history.back_html':
-      '回到 <a href="../">可離線之網頁版本</a>',
+    'history.back_html': '回到 <a href="../">可離線之網頁版本</a>',
     'history.only_major': '僅在此列出重大更新.',
     'history.entries_html':
       '<p><span class="bold">2020-03-26</span> 釋出</p>' +

@@ -50,9 +50,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         skipWaiting: false,
         clientsClaim: false,
-        globPatterns: [
-          '**/*.{js,css,html,png,jpg,svg,json,mp3,wav,webmanifest}',
-        ],
+        globPatterns: ['**/*.{js,css,html,png,jpg,svg,json,mp3,wav,webmanifest}'],
       },
     }),
   ],

@@ -26,28 +26,27 @@
  *  Player height: 64 = 0x40
  *
  */
-'use strict';
 import { rand } from './rand.js';
 
-/** @constant @type {number} ground width */
+/** ground width */
 const GROUND_WIDTH = 432;
-/** @constant @type {number} ground half-width, it is also the net pillar x coordinate */
+/** ground half-width, it is also the net pillar x coordinate */
 export const GROUND_HALF_WIDTH = (GROUND_WIDTH / 2) | 0; // integer division
-/** @constant @type {number} player (Pikachu) length: width = height = 64 */
+/** player (Pikachu) length: width = height = 64 */
 const PLAYER_LENGTH = 64;
-/** @constant @type {number} player half length */
+/** player half length */
 const PLAYER_HALF_LENGTH = (PLAYER_LENGTH / 2) | 0; // integer division
-/** @constant @type {number} player's y coordinate when they are touching ground */
+/** player's y coordinate when they are touching ground */
 const PLAYER_TOUCHING_GROUND_Y_COORD = 244;
-/** @constant @type {number} ball's radius */
+/** ball's radius */
 const BALL_RADIUS = 20;
-/** @constant @type {number} ball's y coordinate when it is touching ground */
+/** ball's y coordinate when it is touching ground */
 const BALL_TOUCHING_GROUND_Y_COORD = 252;
-/** @constant @type {number} net pillar's half width (this value is on this physics engine only, not on the sprite pixel size) */
+/** net pillar's half width (this value is on this physics engine only, not on the sprite pixel size) */
 const NET_PILLAR_HALF_WIDTH = 25;
-/** @constant @type {number} net pillar top's top side y coordinate */
+/** net pillar top's top side y coordinate */
 const NET_PILLAR_TOP_TOP_Y_COORD = 176;
-/** @constant @type {number} net pillar top's bottom side y coordinate (this value is on this physics engine only) */
+/** net pillar top's bottom side y coordinate (this value is on this physics engine only) */
 const NET_PILLAR_TOP_BOTTOM_Y_COORD = 192;
 
 /**
@@ -59,21 +58,35 @@ const NET_PILLAR_TOP_BOTTOM_Y_COORD = 192;
  * But if the ball x coord range is edited, for example, to [20, 432 - 20] for left-right symmetry,
  * it is observed that the infinite loop in {@link expectedLandingPointXWhenPowerHit} does not terminate.
  * So for safety, this infinite loop limit is included for the infinite loops mentioned above.
- * @constant @type {number}
  */
 const INFINITE_LOOP_LIMIT = 1000;
+
+interface PlayerSound {
+  pipikachu: boolean;
+  pika: boolean;
+  chu: boolean;
+}
+
+interface BallSound {
+  powerHit: boolean;
+  ballTouchesGround: boolean;
+}
 
 /**
  * Class representing a pack of physical objects i.e. players and ball
  * whose physical values are calculated and set by {@link physicsEngine} function
  */
 export class PikaPhysics {
+  player1: Player;
+  player2: Player;
+  ball: Ball;
+
   /**
    * Create a physics pack
-   * @param {boolean} isPlayer1Computer Is player on the left (player 1) controlled by computer?
-   * @param {boolean} isPlayer2Computer Is player on the right (player 2) controlled by computer?
+   * @param isPlayer1Computer Is player on the left (player 1) controlled by computer?
+   * @param isPlayer2Computer Is player on the right (player 2) controlled by computer?
    */
-  constructor(isPlayer1Computer, isPlayer2Computer) {
+  constructor(isPlayer1Computer: boolean, isPlayer2Computer: boolean) {
     this.player1 = new Player(false, isPlayer1Computer);
     this.player2 = new Player(true, isPlayer2Computer);
     this.ball = new Ball(false);
@@ -82,15 +95,15 @@ export class PikaPhysics {
   /**
    * run {@link physicsEngine} function with this physics object and user input
    *
-   * @param {PikaUserInput[]} userInputArray userInputArray[0]: PikaUserInput object for player 1, userInputArray[1]: PikaUserInput object for player 2
-   * @return {boolean} Is ball touching ground?
+   * @param userInputArray userInputArray[0]: PikaUserInput object for player 1, userInputArray[1]: PikaUserInput object for player 2
+   * @return Is ball touching ground?
    */
-  runEngineForNextFrame(userInputArray) {
+  runEngineForNextFrame(userInputArray: PikaUserInput[]): boolean {
     const isBallTouchingGround = physicsEngine(
       this.player1,
       this.player2,
       this.ball,
-      userInputArray
+      userInputArray,
     );
     return isBallTouchingGround;
   }
@@ -100,14 +113,12 @@ export class PikaPhysics {
  * Class (or precisely, Interface) representing user input (from keyboard or joystick, whatever)
  */
 export class PikaUserInput {
-  constructor() {
-    /** @type {number} 0: no horizontal-direction input, -1: left-direction input, 1: right-direction input */
-    this.xDirection = 0;
-    /** @type {number} 0: no vertical-direction input, -1: up-direction input, 1: down-direction input */
-    this.yDirection = 0;
-    /** @type {number} 0: auto-repeated or no power hit input, 1: not auto-repeated power hit input */
-    this.powerHit = 0;
-  }
+  /** 0: no horizontal-direction input, -1: left-direction input, 1: right-direction input */
+  xDirection = 0;
+  /** 0: no vertical-direction input, -1: up-direction input, 1: down-direction input */
+  yDirection = 0;
+  /** 0: auto-repeated or no power hit input, 1: not auto-repeated power hit input */
+  powerHit = 0;
 }
 
 /**
@@ -122,94 +133,101 @@ export class PikaUserInput {
  * For initial values: refer to FUN_000403a90 && FUN_00401f40
  */
 class Player {
+  /** Is this player on the right side? */
+  isPlayer2: boolean; // 0xA0
+  /** Is controlled by computer? */
+  isComputer: boolean; // 0xA4
+  /** -1: left, 0: no diving, 1: right */
+  divingDirection = 0; // 0xB4
+  lyingDownDurationLeft = -1; // 0xB8
+  isWinner = false; // 0xD0
+  gameEnded = false; // 0xD4
+
+  /**
+   * It flips randomly to 0 or 1 by the {@link letComputerDecideUserInput} function (FUN_00402360)
+   * when ball is hanging around on the other player's side.
+   * If it is 0, computer player stands by around the middle point of their side.
+   * If it is 1, computer player stands by adjacent to the net.
+   * 0 or 1
+   */
+  computerWhereToStandBy = 0; // 0xDC
+
+  /**
+   * This property is not in the player pointers of the original source code.
+   * But for sound effect (especially for stereo sound),
+   * it is convenient way to give sound property to a Player.
+   * The original name is stereo sound.
+   */
+  sound: PlayerSound = {
+    pipikachu: false,
+    pika: false,
+    chu: false,
+  };
+
+  // Fields reinitialized in initializeForNewRound; defaults are placeholders.
+  /** x coord */
+  x = 0; // 0xA8
+  /** y coord */
+  y = 0; // 0xAC
+  /** y direction velocity */
+  yVelocity = 0; // 0xB0
+  isCollisionWithBallHappened = false; // 0xBC
+
+  /**
+   * Player's state
+   * 0: normal, 1: jumping, 2: jumping_and_power_hitting, 3: diving
+   * 4: lying_down_after_diving
+   * 5: win!, 6: lost..
+   * 0, 1, 2, 3, 4, 5 or 6
+   */
+  state = 0; // 0xC0
+  frameNumber = 0; // 0xC4
+  normalStatusArmSwingDirection = 1; // 0xC8
+  delayBeforeNextFrame = 0; // 0xCC
+
+  /**
+   * This value is initialized to (_rand() % 5) before the start of every round.
+   * The greater the number, the bolder the computer player.
+   *
+   * If computer has higher boldness,
+   * judges more the ball is hanging around the other player's side,
+   * has greater distance to the expected landing point of the ball,
+   * jumps more,
+   * and dives less.
+   * See the source code of the {@link letComputerDecideUserInput} function (FUN_00402360).
+   *
+   * 0, 1, 2, 3 or 4
+   */
+  computerBoldness = 0; // 0xD8
+
   /**
    * create a player
-   * @param {boolean} isPlayer2 Is this player on the right side?
-   * @param {boolean} isComputer Is this player controlled by computer?
+   * @param isPlayer2 Is this player on the right side?
+   * @param isComputer Is this player controlled by computer?
    */
-  constructor(isPlayer2, isComputer) {
-    /** @type {boolean} Is this player on the right side? */
+  constructor(isPlayer2: boolean, isComputer: boolean) {
     this.isPlayer2 = isPlayer2; // 0xA0
-    /** @type {boolean} Is controlled by computer? */
     this.isComputer = isComputer; // 0xA4
     this.initializeForNewRound();
-
-    /** @type {number} -1: left, 0: no diving, 1: right */
-    this.divingDirection = 0; // 0xB4
-    /** @type {number} */
-    this.lyingDownDurationLeft = -1; // 0xB8
-    /** @type {boolean} */
-    this.isWinner = false; // 0xD0
-    /** @type {boolean} */
-    this.gameEnded = false; // 0xD4
-
-    /**
-     * It flips randomly to 0 or 1 by the {@link letComputerDecideUserInput} function (FUN_00402360)
-     * when ball is hanging around on the other player's side.
-     * If it is 0, computer player stands by around the middle point of their side.
-     * If it is 1, computer player stands by adjacent to the net.
-     * @type {number} 0 or 1
-     */
-    this.computerWhereToStandBy = 0; // 0xDC
-
-    /**
-     * This property is not in the player pointers of the original source code.
-     * But for sound effect (especially for stereo sound),
-     * it is convenient way to give sound property to a Player.
-     * The original name is stereo sound.
-     * @type {Object.<string, boolean>}
-     */
-    this.sound = {
-      pipikachu: false,
-      pika: false,
-      chu: false,
-    };
   }
 
   /**
    * initialize for new round
    */
-  initializeForNewRound() {
-    /** @type {number} x coord */
+  initializeForNewRound(): void {
     this.x = 36; // 0xA8 // initialized to 36 (player1) or 396 (player2)
     if (this.isPlayer2) {
       this.x = GROUND_WIDTH - 36;
     }
-    /** @type {number} y coord */
     this.y = PLAYER_TOUCHING_GROUND_Y_COORD; // 0xAC   // initialized to 244
-    /** @type {number} y direction velocity */
     this.yVelocity = 0; // 0xB0  // initialized to 0
-    /** @type {boolean} */
     this.isCollisionWithBallHappened = false; // 0xBC   // initialized to 0 i.e false
 
-    /**
-     * Player's state
-     * 0: normal, 1: jumping, 2: jumping_and_power_hitting, 3: diving
-     * 4: lying_down_after_diving
-     * 5: win!, 6: lost..
-     * @type {number} 0, 1, 2, 3, 4, 5 or 6
-     */
     this.state = 0; // 0xC0   // initialized to 0
-    /** @type {number} */
     this.frameNumber = 0; // 0xC4   // initialized to 0
-    /** @type {number} */
     this.normalStatusArmSwingDirection = 1; // 0xC8  // initialized to 1
-    /** @type {number} */
     this.delayBeforeNextFrame = 0; // 0xCC  // initialized to 0
 
-    /**
-     * This value is initialized to (_rand() % 5) before the start of every round.
-     * The greater the number, the bolder the computer player.
-     *
-     * If computer has higher boldness,
-     * judges more the ball is hanging around the other player's side,
-     * has greater distance to the expected landing point of the ball,
-     * jumps more,
-     * and dives less.
-     * See the source code of the {@link letComputerDecideUserInput} function (FUN_00402360).
-     *
-     * @type {number} 0, 1, 2, 3 or 4
-     */
     this.computerBoldness = rand() % 5; // 0xD8  // initialized to (_rand() % 5)
   }
 }
@@ -224,67 +242,72 @@ class Player {
  * For initial Values: refer to FUN_000403a90 && FUN_00402d60
  */
 class Ball {
+  /** x coord of expected landing point */
+  expectedLandingPointX = 0; // 0x40
+  /**
+   * ball rotation frame number selector
+   * During the period where it continues to be 5, hyper ball glitch occur.
+   * 0, 1, 2, 3, 4 or 5
+   */
+  rotation = 0; // 0x44
+  fineRotation = 0; // 0x48
+  /** x coord for punch effect */
+  punchEffectX = 0; // 0x50
+  /** y coord for punch effect */
+  punchEffectY = 0; // 0x54
+
+  /** Following previous values are for trailing effect for power hit */
+  previousX = 0; // 0x58
+  previousPreviousX = 0; // 0x5c
+  previousY = 0; // 0x60
+  previousPreviousY = 0; // 0x64
+
+  /**
+   * this property is not in the ball pointer of the original source code.
+   * But for sound effect (especially for stereo sound),
+   * it is convenient way to give sound property to a Ball.
+   * The original name is stereo sound.
+   */
+  sound: BallSound = {
+    powerHit: false,
+    ballTouchesGround: false,
+  };
+
+  // Fields reinitialized in initializeForNewRound; defaults are placeholders.
+  /** x coord */
+  x = 0; // 0x30
+  /** y coord */
+  y = 0; // 0x34
+  /** x direction velocity */
+  xVelocity = 0; // 0x38
+  /** y direction velocity */
+  yVelocity = 1; // 0x3C
+  /** punch effect radius */
+  punchEffectRadius = 0; // 0x4c
+  /** is power hit */
+  isPowerHit = false; // 0x68
+
   /**
    * Create a ball
-   * @param {boolean} isPlayer2Serve Will player 2 serve on this new round?
+   * @param isPlayer2Serve Will player 2 serve on this new round?
    */
-  constructor(isPlayer2Serve) {
+  constructor(isPlayer2Serve: boolean) {
     this.initializeForNewRound(isPlayer2Serve);
-    /** @type {number} x coord of expected landing point */
-    this.expectedLandingPointX = 0; // 0x40
-    /**
-     * ball rotation frame number selector
-     * During the period where it continues to be 5, hyper ball glitch occur.
-     * @type {number} 0, 1, 2, 3, 4 or 5
-     * */
-    this.rotation = 0; // 0x44
-    /** @type {number} */
-    this.fineRotation = 0; // 0x48
-    /** @type {number} x coord for punch effect */
-    this.punchEffectX = 0; // 0x50
-    /** @type {number} y coord for punch effect */
-    this.punchEffectY = 0; // 0x54
-
-    /**
-     * Following previous values are for trailing effect for power hit
-     * @type {number}
-     */
-    this.previousX = 0; // 0x58
-    this.previousPreviousX = 0; // 0x5c
-    this.previousY = 0; // 0x60
-    this.previousPreviousY = 0; // 0x64
-
-    /**
-     * this property is not in the ball pointer of the original source code.
-     * But for sound effect (especially for stereo sound),
-     * it is convenient way to give sound property to a Ball.
-     * The original name is stereo sound.
-     */
-    this.sound = {
-      powerHit: false,
-      ballTouchesGround: false,
-    };
   }
 
   /**
    * Initialize for new round
-   * @param {boolean} isPlayer2Serve will player on the right side serve on this new round?
+   * @param isPlayer2Serve will player on the right side serve on this new round?
    */
-  initializeForNewRound(isPlayer2Serve) {
-    /** @type {number} x coord */
+  initializeForNewRound(isPlayer2Serve: boolean): void {
     this.x = 56; // 0x30    // initialized to 56 or 376
     if (isPlayer2Serve === true) {
       this.x = GROUND_WIDTH - 56;
     }
-    /** @type {number} y coord */
     this.y = 0; // 0x34   // initialized to 0
-    /** @type {number} x direction velocity */
     this.xVelocity = 0; // 0x38  // initialized to 0
-    /** @type {number} y direction velocity */
     this.yVelocity = 1; // 0x3C  // initialized to 1
-    /** @type {number} punch effect radius */
     this.punchEffectRadius = 0; // 0x4c // initialized to 0
-    /** @type {boolean} is power hit */
     this.isPowerHit = false; // 0x68  // initialized to 0 i.e. false
   }
 }
@@ -294,18 +317,22 @@ class Ball {
  * This is the Pikachu Volleyball physics engine!
  * This physics engine calculates and set the physics values for the next frame.
  *
- * @param {Player} player1 player on the left side
- * @param {Player} player2 player on the right side
- * @param {Ball} ball ball
- * @param {PikaUserInput[]} userInputArray userInputArray[0]: user input for player 1, userInputArray[1]: user input for player 2
- * @return {boolean} Is ball touching ground?
+ * @param player1 player on the left side
+ * @param player2 player on the right side
+ * @param ball ball
+ * @param userInputArray userInputArray[0]: user input for player 1, userInputArray[1]: user input for player 2
+ * @return Is ball touching ground?
  */
-function physicsEngine(player1, player2, ball, userInputArray) {
-  const isBallTouchingGround =
-    processCollisionBetweenBallAndWorldAndSetBallPosition(ball);
+function physicsEngine(
+  player1: Player,
+  player2: Player,
+  ball: Ball,
+  userInputArray: PikaUserInput[],
+): boolean {
+  const isBallTouchingGround = processCollisionBetweenBallAndWorldAndSetBallPosition(ball);
 
-  let player;
-  let theOtherPlayer;
+  let player: Player;
+  let theOtherPlayer: Player;
   for (let i = 0; i < 2; i++) {
     if (i === 0) {
       player = player1;
@@ -322,12 +349,9 @@ function physicsEngine(player1, player2, ball, userInputArray) {
     // FUN_00402d90 include FUN_004031b0(calculateExpectedLandingPointXFor)
     calculateExpectedLandingPointXFor(ball); // calculate expected_X;
 
-    processPlayerMovementAndSetPlayerPosition(
-      player,
-      userInputArray[i],
-      theOtherPlayer,
-      ball
-    );
+    const userInput = userInputArray[i];
+    if (userInput === undefined) continue;
+    processPlayerMovementAndSetPlayerPosition(player, userInput, theOtherPlayer, ball);
 
     // FUN_00402830 omitted
     // FUN_00406020 omitted
@@ -343,20 +367,14 @@ function physicsEngine(player1, player2, ball, userInputArray) {
 
     // FUN_00402810 omitted: this javascript code is refactored not to need this function
 
-    const isHappened = isCollisionBetweenBallAndPlayerHappened(
-      ball,
-      player.x,
-      player.y
-    );
+    const isHappened = isCollisionBetweenBallAndPlayerHappened(ball, player.x, player.y);
     if (isHappened === true) {
       if (player.isCollisionWithBallHappened === false) {
-        processCollisionBetweenBallAndPlayer(
-          ball,
-          player.x,
-          userInputArray[i],
-          player.state
-        );
-        player.isCollisionWithBallHappened = true;
+        const userInput = userInputArray[i];
+        if (userInput !== undefined) {
+          processCollisionBetweenBallAndPlayer(ball, player.x, userInput, player.state);
+          player.isCollisionWithBallHappened = true;
+        }
       }
     } else {
       player.isCollisionWithBallHappened = false;
@@ -373,12 +391,12 @@ function physicsEngine(player1, player2, ball, userInputArray) {
 /**
  * FUN_00403070
  * Is collision between ball and player happened?
- * @param {Ball} ball
- * @param {Player["x"]} playerX player.x
- * @param {Player["y"]} playerY player.y
- * @return {boolean}
  */
-function isCollisionBetweenBallAndPlayerHappened(ball, playerX, playerY) {
+function isCollisionBetweenBallAndPlayerHappened(
+  ball: Ball,
+  playerX: number,
+  playerY: number,
+): boolean {
   let diff = ball.x - playerX;
   if (Math.abs(diff) <= PLAYER_HALF_LENGTH) {
     diff = ball.y - playerY;
@@ -392,10 +410,9 @@ function isCollisionBetweenBallAndPlayerHappened(ball, playerX, playerY) {
 /**
  * FUN_00402dc0
  * Process collision between ball and world and set ball position
- * @param {Ball} ball
- * @return {boolean} Is ball touching ground?
+ * @return Is ball touching ground?
  */
-function processCollisionBetweenBallAndWorldAndSetBallPosition(ball) {
+function processCollisionBetweenBallAndWorldAndSetBallPosition(ball: Ball): boolean {
   // This is not part of this function in the original assembly code.
   // In the original assembly code, it is processed in other function (FUN_00402ee0)
   // But it is proper to process here.
@@ -423,7 +440,7 @@ function processCollisionBetweenBallAndWorldAndSetBallPosition(ball) {
   const futureBallX = ball.x + ball.xVelocity;
   /*
     If the center of ball would get out of left world bound or right world bound, bounce back.
-    
+
     In this if statement, when considering left-right symmetry,
     "futureBallX > GROUND_WIDTH" should be changed to "futureBallX > (GROUND_WIDTH - BALL_RADIUS)",
     or "futureBallX < BALL_RADIUS" should be changed to "futureBallX < 0".
@@ -488,17 +505,13 @@ function processCollisionBetweenBallAndWorldAndSetBallPosition(ball) {
 /**
  * FUN_00401fc0
  * Process player movement according to user input and set player position
- * @param {Player} player
- * @param {PikaUserInput} userInput
- * @param {Player} theOtherPlayer
- * @param {Ball} ball
  */
 function processPlayerMovementAndSetPlayerPosition(
-  player,
-  userInput,
-  theOtherPlayer,
-  ball
-) {
+  player: Player,
+  userInput: PikaUserInput,
+  theOtherPlayer: Player,
+  ball: Ball,
+): void {
   if (player.isComputer === true) {
     letComputerDecideUserInput(player, ball, theOtherPlayer, userInput);
   }
@@ -619,14 +632,11 @@ function processPlayerMovementAndSetPlayerPosition(
     player.delayBeforeNextFrame += 1;
     if (player.delayBeforeNextFrame > 3) {
       player.delayBeforeNextFrame = 0;
-      const futureFrameNumber =
-        player.frameNumber + player.normalStatusArmSwingDirection;
+      const futureFrameNumber = player.frameNumber + player.normalStatusArmSwingDirection;
       if (futureFrameNumber < 0 || futureFrameNumber > 4) {
-        player.normalStatusArmSwingDirection =
-          -player.normalStatusArmSwingDirection;
+        player.normalStatusArmSwingDirection = -player.normalStatusArmSwingDirection;
       }
-      player.frameNumber =
-        player.frameNumber + player.normalStatusArmSwingDirection;
+      player.frameNumber = player.frameNumber + player.normalStatusArmSwingDirection;
     }
   }
 
@@ -651,9 +661,8 @@ function processPlayerMovementAndSetPlayerPosition(
 /**
  * FUN_004025e0
  * Process game end frame (for winner and loser motions) for the given player
- * @param {Player} player
  */
-function processGameEndFrameFor(player) {
+function processGameEndFrameFor(player: Player): void {
   if (player.gameEnded === true && player.frameNumber < 4) {
     player.delayBeforeNextFrame += 1;
     if (player.delayBeforeNextFrame > 4) {
@@ -669,18 +678,13 @@ function processGameEndFrameFor(player) {
  * This function only sets velocity of ball and expected landing point x of ball.
  * This function does not set position of ball.
  * The ball position is set by {@link processCollisionBetweenBallAndWorldAndSetBallPosition} function
- *
- * @param {Ball} ball
- * @param {Player["x"]} playerX
- * @param {PikaUserInput} userInput
- * @param {Player["state"]} playerState
  */
 function processCollisionBetweenBallAndPlayer(
-  ball,
-  playerX,
-  userInput,
-  playerState
-) {
+  ball: Ball,
+  playerX: number,
+  userInput: PikaUserInput,
+  playerState: number,
+): void {
   // playerX is pika's x position
   // if collision occur,
   // greater the x position difference between pika and ball,
@@ -733,9 +737,8 @@ function processCollisionBetweenBallAndPlayer(
 /**
  * FUN_004031b0
  * Calculate x coordinate of expected landing point of the ball
- * @param {Ball} ball
  */
-function calculateExpectedLandingPointXFor(ball) {
+function calculateExpectedLandingPointXFor(ball: Ball): void {
   const copyBall = {
     x: ball.x,
     y: ball.y,
@@ -775,10 +778,7 @@ function calculateExpectedLandingPointXFor(ball) {
 
     copyBall.y = copyBall.y + copyBall.yVelocity;
     // if copyBall would touch ground
-    if (
-      copyBall.y > BALL_TOUCHING_GROUND_Y_COORD ||
-      loopCounter >= INFINITE_LOOP_LIMIT
-    ) {
+    if (copyBall.y > BALL_TOUCHING_GROUND_Y_COORD || loopCounter >= INFINITE_LOOP_LIMIT) {
       break;
     }
     copyBall.x = copyBall.x + copyBall.xVelocity;
@@ -795,21 +795,23 @@ function calculateExpectedLandingPointXFor(ball) {
  * by the given parameters (player, ball and theOtherPlayer),
  * and reflects these to the given user input object.
  *
- * @param {Player} player The player whom computer controls
- * @param {Ball} ball ball
- * @param {Player} theOtherPlayer The other player
- * @param {PikaUserInput} userInput user input of the player whom computer controls
+ * @param player The player whom computer controls
+ * @param ball ball
+ * @param theOtherPlayer The other player
+ * @param userInput user input of the player whom computer controls
  */
-function letComputerDecideUserInput(player, ball, theOtherPlayer, userInput) {
+function letComputerDecideUserInput(
+  player: Player,
+  ball: Ball,
+  theOtherPlayer: Player,
+  userInput: PikaUserInput,
+): void {
   userInput.xDirection = 0;
   userInput.yDirection = 0;
   userInput.powerHit = 0;
 
   let virtualExpectedLandingPointX = ball.expectedLandingPointX;
-  if (
-    Math.abs(ball.x - player.x) > 100 &&
-    Math.abs(ball.xVelocity) < player.computerBoldness + 5
-  ) {
+  if (Math.abs(ball.x - player.x) > 100 && Math.abs(ball.xVelocity) < player.computerBoldness + 5) {
     const leftBoundary = Number(player.isPlayer2) * GROUND_HALF_WIDTH;
     if (
       (ball.expectedLandingPointX <= leftBoundary ||
@@ -818,15 +820,11 @@ function letComputerDecideUserInput(player, ball, theOtherPlayer, userInput) {
       player.computerWhereToStandBy === 0
     ) {
       // If conditions above met, the computer estimates the proper location to stay as the middle point of their side
-      virtualExpectedLandingPointX =
-        leftBoundary + ((GROUND_HALF_WIDTH / 2) | 0);
+      virtualExpectedLandingPointX = leftBoundary + ((GROUND_HALF_WIDTH / 2) | 0);
     }
   }
 
-  if (
-    Math.abs(virtualExpectedLandingPointX - player.x) >
-    player.computerBoldness + 8
-  ) {
+  if (Math.abs(virtualExpectedLandingPointX - player.x) > player.computerBoldness + 8) {
     if (player.x < virtualExpectedLandingPointX) {
       userInput.xDirection = 1;
     } else {
@@ -852,8 +850,7 @@ function letComputerDecideUserInput(player, ball, theOtherPlayer, userInput) {
     if (
       ball.expectedLandingPointX > leftBoundary &&
       ball.expectedLandingPointX < rightBoundary &&
-      Math.abs(ball.x - player.x) >
-        player.computerBoldness * 5 + PLAYER_LENGTH &&
+      Math.abs(ball.x - player.x) > player.computerBoldness * 5 + PLAYER_LENGTH &&
       ball.x > leftBoundary &&
       ball.x < rightBoundary &&
       ball.y > 174
@@ -875,18 +872,10 @@ function letComputerDecideUserInput(player, ball, theOtherPlayer, userInput) {
       }
     }
     if (Math.abs(ball.x - player.x) < 48 && Math.abs(ball.y - player.y) < 48) {
-      const willInputPowerHit = decideWhetherInputPowerHit(
-        player,
-        ball,
-        theOtherPlayer,
-        userInput
-      );
+      const willInputPowerHit = decideWhetherInputPowerHit(player, ball, theOtherPlayer, userInput);
       if (willInputPowerHit === true) {
         userInput.powerHit = 1;
-        if (
-          Math.abs(theOtherPlayer.x - player.x) < 80 &&
-          userInput.yDirection !== -1
-        ) {
+        if (Math.abs(theOtherPlayer.x - player.x) < 80 && userInput.yDirection !== -1) {
           userInput.yDirection = -1;
         }
       }
@@ -899,26 +888,26 @@ function letComputerDecideUserInput(player, ball, theOtherPlayer, userInput) {
  * This function is called by {@link letComputerDecideUserInput},
  * and also sets x and y direction user input so that it participate in
  * the decision of the direction of power hit.
- * @param {Player} player the player whom computer controls
- * @param {Ball} ball ball
- * @param {Player} theOtherPlayer The other player
- * @param {PikaUserInput} userInput user input for the player whom computer controls
- * @return {boolean} Will input power hit?
+ *
+ * @return Will input power hit?
  */
-function decideWhetherInputPowerHit(player, ball, theOtherPlayer, userInput) {
+function decideWhetherInputPowerHit(
+  player: Player,
+  ball: Ball,
+  theOtherPlayer: Player,
+  userInput: PikaUserInput,
+): boolean {
   if (rand() % 2 === 0) {
     for (let xDirection = 1; xDirection > -1; xDirection--) {
       for (let yDirection = -1; yDirection < 2; yDirection++) {
         const expectedLandingPointX = expectedLandingPointXWhenPowerHit(
           xDirection,
           yDirection,
-          ball
+          ball,
         );
         if (
-          (expectedLandingPointX <=
-            Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
-            expectedLandingPointX >=
-              Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
+          (expectedLandingPointX <= Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
+            expectedLandingPointX >= Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
           Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH
         ) {
           userInput.xDirection = xDirection;
@@ -933,13 +922,11 @@ function decideWhetherInputPowerHit(player, ball, theOtherPlayer, userInput) {
         const expectedLandingPointX = expectedLandingPointXWhenPowerHit(
           xDirection,
           yDirection,
-          ball
+          ball,
         );
         if (
-          (expectedLandingPointX <=
-            Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
-            expectedLandingPointX >=
-              Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
+          (expectedLandingPointX <= Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
+            expectedLandingPointX >= Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
           Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH
         ) {
           userInput.xDirection = xDirection;
@@ -957,16 +944,14 @@ function decideWhetherInputPowerHit(player, ball, theOtherPlayer, userInput) {
  * This function is called by {@link decideWhetherInputPowerHit},
  * and calculates the expected x coordinate of the landing point of the ball
  * when power hit
- * @param {PikaUserInput["xDirection"]} userInputXDirection
- * @param {PikaUserInput["yDirection"]} userInputYDirection
- * @param {Ball} ball
- * @return {number} x coord of expected landing point when power hit the ball
+ *
+ * @return x coord of expected landing point when power hit the ball
  */
 function expectedLandingPointXWhenPowerHit(
-  userInputXDirection,
-  userInputYDirection,
-  ball
-) {
+  userInputXDirection: number,
+  userInputYDirection: number,
+  ball: Ball,
+): number {
   const copyBall = {
     x: ball.x,
     y: ball.y,
@@ -1020,10 +1005,7 @@ function expectedLandingPointXWhenPowerHit(
       */
     }
     copyBall.y = copyBall.y + copyBall.yVelocity;
-    if (
-      copyBall.y > BALL_TOUCHING_GROUND_Y_COORD ||
-      loopCounter >= INFINITE_LOOP_LIMIT
-    ) {
+    if (copyBall.y > BALL_TOUCHING_GROUND_Y_COORD || loopCounter >= INFINITE_LOOP_LIMIT) {
       return copyBall.x;
     }
     copyBall.x = copyBall.x + copyBall.xVelocity;

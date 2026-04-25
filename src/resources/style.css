@@ -5,10 +5,7 @@
   --canvas-width: 96vmin;
   --canvas-height: calc(96vmin * var(--inverse-aspect-ratio));
   --font-size: 18px;
-  --btn-width: min(
-    calc(5 * var(--font-size)),
-    calc((var(--canvas-width) - 30px) / 4)
-  );
+  --btn-width: min(calc(5 * var(--font-size)), calc((var(--canvas-width) - 30px) / 4));
   --btn-height: calc(3 * var(--font-size));
 }
 :root {
@@ -75,10 +72,7 @@
 @media only screen and (min-width: 768px) and (min-height: 768px) {
   :root {
     --font-size: 22px;
-    --btn-width: min(
-      calc(6 * var(--font-size)),
-      calc((var(--canvas-width) - 30px) / 4)
-    );
+    --btn-width: min(calc(6 * var(--font-size)), calc((var(--canvas-width) - 30px) / 4));
   }
 }
 @media only screen and (min-aspect-ratio: 432/304) {
@@ -477,15 +471,10 @@ div.color-scheme-toggle-switch-container {
   --toggle-switch-height: calc(1.6 * var(--font-size));
   --toggle-ball-diameter: calc(1.2 * var(--font-size));
   --toggle-switch-width: calc(2 * var(--toggle-switch-height));
-  --toggle-ball-top: calc(
-    (var(--toggle-switch-height) - var(--toggle-ball-diameter)) / 2
-  );
-  --toggle-ball-left: calc(
-    (var(--toggle-switch-height) - var(--toggle-ball-diameter)) / 2
-  );
+  --toggle-ball-top: calc((var(--toggle-switch-height) - var(--toggle-ball-diameter)) / 2);
+  --toggle-ball-left: calc((var(--toggle-switch-height) - var(--toggle-ball-diameter)) / 2);
   --toggle-ball-left-toggled: calc(
-    var(--toggle-switch-width) - var(--toggle-ball-diameter) -
-      var(--toggle-ball-left)
+    var(--toggle-switch-width) - var(--toggle-ball-diameter) - var(--toggle-ball-left)
   );
 }
 /*
@@ -515,7 +504,9 @@ input.toggle-switch + label::after {
   width: var(--toggle-ball-diameter);
   border-radius: 50%;
   background-color: var(--btn-color);
-  transition: left 0.5s, background-color 1s;
+  transition:
+    left 0.5s,
+    background-color 1s;
 }
 input.toggle-switch:checked + label::after {
   left: var(--toggle-ball-left-toggled);

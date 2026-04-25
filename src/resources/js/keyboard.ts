@@ -1,43 +1,49 @@
 /**
  * This module takes charge of the user input via keyboard
  */
-'use strict';
 import { PikaUserInput } from './physics.js';
 
 /**
  * Class representing a keyboard used to control a player
  */
 export class PikaKeyboard extends PikaUserInput {
+  powerHitKeyIsDownPrevious = false;
+
+  leftKey: Key;
+  rightKey: Key;
+  upKey: Key;
+  downKey: Key;
+  powerHitKey: Key;
+  downRightKey: Key;
+
   /**
    * Create a keyboard used for game controller
    * left, right, up, down, powerHit: KeyboardEvent.code value for each
    * Refer {@link https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values}
-   * @param {string} left KeyboardEvent.code value of the key to use for left
-   * @param {string} right KeyboardEvent.code value of the key to use for right
-   * @param {string} up KeyboardEvent.code value of the key to use for up
-   * @param {string} down KeyboardEvent.code value of the key to use for down
-   * @param {string} powerHit KeyboardEvent.code value of the key to use for power hit or selection
-   * @param {string} downRight KeyboardEvent.code value of the key to use for having the same effect
+   * @param left KeyboardEvent.code value of the key to use for left
+   * @param right KeyboardEvent.code value of the key to use for right
+   * @param up KeyboardEvent.code value of the key to use for up
+   * @param down KeyboardEvent.code value of the key to use for down
+   * @param powerHit KeyboardEvent.code value of the key to use for power hit or selection
+   * @param downRight KeyboardEvent.code value of the key to use for having the same effect
    *                           when pressing down key and right key at the same time (Only player 1
    *                           has this key)
    */
-  constructor(left, right, up, down, powerHit, downRight = null) {
+  constructor(
+    left: string,
+    right: string,
+    up: string,
+    down: string,
+    powerHit: string,
+    downRight: string | null = null,
+  ) {
     super();
 
-    /** @type {boolean} */
-    this.powerHitKeyIsDownPrevious = false;
-
-    /** @type {Key} */
     this.leftKey = new Key(left);
-    /** @type {Key} */
     this.rightKey = new Key(right);
-    /** @type {Key} */
     this.upKey = new Key(up);
-    /** @type {Key} */
     this.downKey = new Key(down);
-    /** @type {Key} */
     this.powerHitKey = new Key(powerHit);
-    /** @type {Key} */
     this.downRightKey = new Key(downRight);
   }
 
@@ -45,13 +51,10 @@ export class PikaKeyboard extends PikaUserInput {
    * Get xDirection, yDirection, powerHit input from the keyboard.
    * This method is for freezing the keyboard input during the process of one game frame.
    */
-  getInput() {
+  getInput(): void {
     if (this.leftKey.isDown) {
       this.xDirection = -1;
-    } else if (
-      this.rightKey.isDown ||
-      (this.downRightKey && this.downRightKey.isDown)
-    ) {
+    } else if (this.rightKey.isDown || this.downRightKey.isDown) {
       this.xDirection = 1;
     } else {
       this.xDirection = 0;
@@ -59,10 +62,7 @@ export class PikaKeyboard extends PikaUserInput {
 
     if (this.upKey.isDown) {
       this.yDirection = -1;
-    } else if (
-      this.downKey.isDown ||
-      (this.downRightKey && this.downRightKey.isDown)
-    ) {
+    } else if (this.downKey.isDown || this.downRightKey.isDown) {
       this.yDirection = 1;
     } else {
       this.yDirection = 0;
@@ -80,7 +80,7 @@ export class PikaKeyboard extends PikaUserInput {
   /**
    * Subscribe keydown, keyup event listeners for the keys of this keyboard
    */
-  subscribe() {
+  subscribe(): void {
     this.leftKey.subscribe();
     this.rightKey.subscribe();
     this.upKey.subscribe();
@@ -92,7 +92,7 @@ export class PikaKeyboard extends PikaUserInput {
   /**
    * Unsubscribe keydown, keyup event listeners for the keys of this keyboard
    */
-  unsubscribe() {
+  unsubscribe(): void {
     this.leftKey.unsubscribe();
     this.rightKey.unsubscribe();
     this.upKey.unsubscribe();
@@ -107,49 +107,41 @@ export class PikaKeyboard extends PikaUserInput {
  * referred to: https://github.com/kittykatattack/learningPixi
  */
 class Key {
-  /**
-   * Create a key
-   * Refer {@link https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values}
-   * @param {string} value KeyboardEvent.code value of this key
-   */
-  constructor(value) {
-    this.value = value;
-    this.isDown = false;
-    this.isUp = true;
+  value: string | null;
+  isDown = false;
+  isUp = true;
+  downListener: (event: KeyboardEvent) => void;
+  upListener: (event: KeyboardEvent) => void;
 
+  /**
+   * Create a key.
+   * Refer {@link https://developer.mozilla.org/en-US/docs/Web/API/KeyboardEvent/code/code_values}
+   * @param value KeyboardEvent.code value of this key, or null for an unbound key
+   */
+  constructor(value: string | null) {
+    this.value = value;
     this.downListener = this.downHandler.bind(this);
     this.upListener = this.upHandler.bind(this);
     this.subscribe();
   }
 
-  /**
-   * When key downed
-   * @param {KeyboardEvent} event
-   */
-  downHandler(event) {
-    if (event.code === this.value) {
+  downHandler(event: KeyboardEvent): void {
+    if (this.value !== null && event.code === this.value) {
       this.isDown = true;
       this.isUp = false;
       event.preventDefault();
     }
   }
 
-  /**
-   * When key upped
-   * @param {KeyboardEvent} event
-   */
-  upHandler(event) {
-    if (event.code === this.value) {
+  upHandler(event: KeyboardEvent): void {
+    if (this.value !== null && event.code === this.value) {
       this.isDown = false;
       this.isUp = true;
       event.preventDefault();
     }
   }
 
-  /**
-   * Subscribe event listeners
-   */
-  subscribe() {
+  subscribe(): void {
     // I think an event listener for keyup should be attached
     // before the one for keydown to prevent a buggy behavior.
     // If keydown event listener were attached first and
@@ -160,10 +152,7 @@ class Key {
     window.addEventListener('keydown', this.downListener);
   }
 
-  /**
-   * Unsubscribe event listeners
-   */
-  unsubscribe() {
+  unsubscribe(): void {
     window.removeEventListener('keydown', this.downListener);
     window.removeEventListener('keyup', this.upListener);
     this.isDown = false;

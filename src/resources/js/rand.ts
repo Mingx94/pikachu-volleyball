@@ -1,11 +1,10 @@
 /**
  * This module contains random number generator used for the game
  */
-'use strict';
-/** @typedef {function():number} RNG */
 
-/** @type {RNG} custom RNG (random number generator) function which generates a random number in [0, 1] */
-let customRng = null;
+export type RNG = () => number;
+
+let customRng: RNG | null = null;
 
 /**
  * Return random integer in [0, 32767]
@@ -18,20 +17,14 @@ let customRng = null;
  *
  * By default, it uses the function "Math.random" for generating a random number.
  * A custom RNG function can used by setting the "customRng" as the custom RNG function.
- *
- * @return {number} random integer
  */
-export function rand() {
+export function rand(): number {
   if (customRng === null) {
     return Math.floor(32768 * Math.random());
   }
   return Math.floor(32768 * customRng());
 }
 
-/**
- * Set custom RNG function
- * @param {RNG} rng
- */
-export function setCustomRng(rng) {
+export function setCustomRng(rng: RNG): void {
   customRng = rng;
 }

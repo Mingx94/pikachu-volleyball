@@ -6,13 +6,17 @@
  * The address of the original function is in the comment.
  * ex) FUN_00404770 means the function at the address 00404770 in the machine code.
  */
-'use strict';
 import { rand } from './rand.js';
 
 /**
  * Class represents a cloud
  */
 export class Cloud {
+  topLeftPointX: number;
+  topLeftPointY: number;
+  topLeftPointXVelocity: number;
+  sizeDiffTurnNumber: number;
+
   constructor() {
     this.topLeftPointX = -68 + (rand() % (432 + 68));
     this.topLeftPointY = rand() % 152;
@@ -20,24 +24,24 @@ export class Cloud {
     this.sizeDiffTurnNumber = rand() % 11;
   }
 
-  get sizeDiff() {
+  get sizeDiff(): number {
     // this same as return [0, 1, 2, 3, 4, 5, 4, 3, 2, 1, 0][this.sizeDiffTurnNumber]
     return 5 - Math.abs(this.sizeDiffTurnNumber - 5);
   }
 
-  get spriteTopLeftPointX() {
+  get spriteTopLeftPointX(): number {
     return this.topLeftPointX - this.sizeDiff;
   }
 
-  get spriteTopLeftPointY() {
+  get spriteTopLeftPointY(): number {
     return this.topLeftPointY - this.sizeDiff;
   }
 
-  get spriteWidth() {
+  get spriteWidth(): number {
     return 48 + 2 * this.sizeDiff;
   }
 
-  get spriteHeight() {
+  get spriteHeight(): number {
     return 24 + 2 * this.sizeDiff;
   }
 }
@@ -46,10 +50,11 @@ export class Cloud {
  * Class representing wave
  */
 export class Wave {
+  verticalCoord = 0;
+  verticalCoordVelocity = 2;
+  yCoords: number[] = [];
+
   constructor() {
-    this.verticalCoord = 0;
-    this.verticalCoordVelocity = 2;
-    this.yCoords = [];
     for (let i = 0; i < 432 / 16; i++) {
       this.yCoords.push(314);
     }
@@ -59,19 +64,18 @@ export class Wave {
 /**
  * FUN_00404770
  * Move clouds and wave
- * @param {Cloud[]} cloudArray
- * @param {Wave} wave
  */
-export function cloudAndWaveEngine(cloudArray, wave) {
+export function cloudAndWaveEngine(cloudArray: Cloud[], wave: Wave): void {
   for (let i = 0; i < 10; i++) {
-    cloudArray[i].topLeftPointX += cloudArray[i].topLeftPointXVelocity;
-    if (cloudArray[i].topLeftPointX > 432) {
-      cloudArray[i].topLeftPointX = -68;
-      cloudArray[i].topLeftPointY = rand() % 152;
-      cloudArray[i].topLeftPointXVelocity = 1 + (rand() % 2);
+    const cloud = cloudArray[i];
+    if (cloud === undefined) continue;
+    cloud.topLeftPointX += cloud.topLeftPointXVelocity;
+    if (cloud.topLeftPointX > 432) {
+      cloud.topLeftPointX = -68;
+      cloud.topLeftPointY = rand() % 152;
+      cloud.topLeftPointXVelocity = 1 + (rand() % 2);
     }
-    cloudArray[i].sizeDiffTurnNumber =
-      (cloudArray[i].sizeDiffTurnNumber + 1) % 11;
+    cloud.sizeDiffTurnNumber = (cloud.sizeDiffTurnNumber + 1) % 11;
   }
 
   wave.verticalCoord += wave.verticalCoordVelocity;

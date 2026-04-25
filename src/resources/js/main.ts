@@ -7,29 +7,28 @@
  * reverse engineering the core part of the original Pikachu Volleyball game
  * which is developed by "1997 (C) SACHI SOFT / SAWAYAKAN Programmers" & "1997 (C) Satoshi Takenouchi".
  *
- * "physics.js", "cloud_and_wave.js", and some codes in "view.js" are the results of this reverse engineering.
+ * "physics.ts", "cloud_and_wave.ts", and some codes in "view.ts" are the results of this reverse engineering.
  * Refer to the comments in each file for the machine code addresses of the original functions.
  ********************************************************************************************************************
  *
  * This web version game is mainly composed of three parts which follows MVC pattern.
- *  1) "physics.js" (Model): The physics engine which takes charge of the dynamics of the ball and the players (Pikachus).
+ *  1) "physics.ts" (Model): The physics engine which takes charge of the dynamics of the ball and the players (Pikachus).
  *                           It is gained by reverse engineering the machine code of the original game.
- *  2) "view.js" (View): The rendering part of the game which depends on pixi.js (https://www.pixijs.com/, https://github.com/pixijs/pixi.js) library.
+ *  2) "view.ts" (View): The rendering part of the game which depends on pixi.js (https://www.pixijs.com/, https://github.com/pixijs/pixi.js) library.
  *                       Some codes in this part is gained by reverse engineering the original machine code.
- *  3) "pikavolley.js" (Controller): Make the game work by controlling the Model and the View according to the user input.
+ *  3) "pikavolley.ts" (Controller): Make the game work by controlling the Model and the View according to the user input.
  *
  * And explanations for other source files are below.
- *  - "cloud_and_wave.js": This is also a Model part which takes charge of the clouds and wave motion in the game. Of course, it is also rendered by "view.js".
+ *  - "cloud_and_wave.ts": This is also a Model part which takes charge of the clouds and wave motion in the game. Of course, it is also rendered by "view.ts".
  *                         It is also gained by reverse engineering the original machine code.
- *  - "keyboard.js": Support the Controller("pikavolley.js") to get a user input via keyboard.
- *  - "audio.js": The game audio or sounds. It depends on pixi-sound (https://github.com/pixijs/pixi-sound) library.
- *  - "rand.js": For the random function used in the Models ("physics.js", "cloud_and_wave.js").
- *  - "assets_path.js": For the assets (image files, sound files) locations.
- *  - "ui.js": For the user interface (menu bar, buttons etc.) of the html page.
+ *  - "keyboard.ts": Support the Controller("pikavolley.ts") to get a user input via keyboard.
+ *  - "audio.ts": The game audio or sounds. It depends on pixi-sound (https://github.com/pixijs/pixi-sound) library.
+ *  - "rand.ts": For the random function used in the Models ("physics.ts", "cloud_and_wave.ts").
+ *  - "assets_path.ts": For the assets (image files, sound files) locations.
+ *  - "ui.ts": For the user interface (menu bar, buttons etc.) of the html page.
  */
-'use strict';
 // i18n must run before any @pixi/* import: it applies the Korean texture path
-// overrides on `ASSETS_PATH.TEXTURES` synchronously, before main.js queues
+// overrides on `ASSETS_PATH.TEXTURES` synchronously, before main.ts queues
 // the spritesheet on the PixiJS Loader.
 import './i18n/index.js';
 import { settings } from '@pixi/settings';
@@ -83,13 +82,19 @@ const stage = new Container();
 const ticker = new Ticker();
 const loader = new Loader();
 
+function getEl(id: string): HTMLElement {
+  const e = document.getElementById(id);
+  if (!e) throw new Error(`Element not found: #${id}`);
+  return e;
+}
+
 renderer.view.setAttribute('id', 'game-canvas');
-document.getElementById('game-canvas-container').appendChild(renderer.view);
+getEl('game-canvas-container').appendChild(renderer.view);
 renderer.render(stage); // To make the initial canvas painting stable in the Firefox browser.
 
 loader.add(ASSETS_PATH.SPRITE_SHEET);
-for (const prop in ASSETS_PATH.SOUNDS) {
-  loader.add(ASSETS_PATH.SOUNDS[prop]);
+for (const url of Object.values(ASSETS_PATH.SOUNDS)) {
+  loader.add(url);
 }
 
 setUpInitialUI();
@@ -97,9 +102,9 @@ setUpInitialUI();
 /**
  * Set up the initial UI.
  */
-function setUpInitialUI() {
-  const loadingBox = document.getElementById('loading-box');
-  const progressBar = document.getElementById('progress-bar');
+function setUpInitialUI(): void {
+  const loadingBox = getEl('loading-box');
+  const progressBar = getEl('progress-bar');
   loader.onProgress.add(() => {
     progressBar.style.width = `${loader.progress}%`;
   });
@@ -107,30 +112,23 @@ function setUpInitialUI() {
     loadingBox.classList.add('hidden');
   });
 
-  const aboutBox = document.getElementById('about-box');
-  const aboutBtn = document.getElementById('about-btn');
-  const closeAboutBtn = document.getElementById('close-about-btn');
-  const gameDropdownBtn = document.getElementById('game-dropdown-btn');
-  const optionsDropdownBtn = document.getElementById('options-dropdown-btn');
-  // @ts-ignore
+  const aboutBox = getEl('about-box');
+  const aboutBtn = getEl('about-btn') as HTMLButtonElement;
+  const closeAboutBtn = getEl('close-about-btn');
+  const gameDropdownBtn = getEl('game-dropdown-btn') as HTMLButtonElement;
+  const optionsDropdownBtn = getEl('options-dropdown-btn') as HTMLButtonElement;
   gameDropdownBtn.disabled = true;
-  // @ts-ignore
   optionsDropdownBtn.disabled = true;
-  const closeAboutBox = () => {
+  const closeAboutBox = (): void => {
     if (!aboutBox.classList.contains('hidden')) {
       aboutBox.classList.add('hidden');
-      // @ts-ignore
       aboutBtn.disabled = true;
     }
-    aboutBtn.getElementsByClassName('text-play')[0].classList.add('hidden');
-    aboutBtn.getElementsByClassName('text-about')[0].classList.remove('hidden');
+    aboutBtn.getElementsByClassName('text-play')[0]?.classList.add('hidden');
+    aboutBtn.getElementsByClassName('text-about')[0]?.classList.remove('hidden');
     aboutBtn.classList.remove('glow');
-    closeAboutBtn
-      .getElementsByClassName('text-play')[0]
-      .classList.add('hidden');
-    closeAboutBtn
-      .getElementsByClassName('text-close')[0]
-      .classList.remove('hidden');
+    closeAboutBtn.getElementsByClassName('text-play')[0]?.classList.add('hidden');
+    closeAboutBtn.getElementsByClassName('text-close')[0]?.classList.remove('hidden');
     closeAboutBtn.classList.remove('glow');
 
     loader.load(setup); // setup is called after loader finishes loading
@@ -145,7 +143,7 @@ function setUpInitialUI() {
 /**
  * Set up the game and the full UI, and start the game.
  */
-function setup() {
+function setup(): void {
   const pikaVolley = new PikachuVolleyball(stage, loader.resources);
   setUpUI(pikaVolley, ticker);
   start(pikaVolley);
@@ -153,9 +151,8 @@ function setup() {
 
 /**
  * Start the game.
- * @param {PikachuVolleyball} pikaVolley
  */
-function start(pikaVolley) {
+function start(pikaVolley: PikachuVolleyball): void {
   ticker.maxFPS = pikaVolley.normalFPS;
   ticker.add(() => {
     pikaVolley.gameLoop();
