@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Commands
 
-- `npm install` — install deps (falls back to `node v16` / `npm v8` if errors).
-- `npm start` — webpack-dev-server with inline source maps (`webpack.dev.js`).
-- `npm run build` — production bundle to `dist/` (`webpack.prod.js`).
-- `npx http-server dist` — serve a built bundle locally after `npm run build`.
+- `npm install` — install deps.
+- `npm start` — Vite dev server on port 8080 (configured in `vite.config.js`).
+- `npm run build` — production bundle to `dist/` (Vite + `vite-plugin-pwa` GenerateSW).
+- `npm run preview` — serve a built bundle locally after `npm run build`.
 - No test runner is configured. `npm test` intentionally exits non-zero.
 
 Lint/format are configured (ESLint + Prettier via `eslint-plugin-prettier`) but no npm script wires them up — run `npx eslint src` or `npx prettier --check src` directly.
@@ -24,8 +24,9 @@ MVC split, all under `src/resources/js/`:
 - **Model — `cloud_and_wave.js`**: Also reverse-engineered; drives background cloud/wave motion, rendered by `view.js`.
 - **View — `view.js`**: PixiJS rendering. `IntroView`, `MenuView`, `GameView`, `FadeInOut` are mounted as children of the root stage in `pikavolley.js`.
 - **Controller — `pikavolley.js`**: `PikachuVolleyball` class owns physics, view, audio, and two `PikaKeyboard`s. Runs at `normalFPS = 25`; slow-motion replay drops to `slowMotionFPS = 5` for `SLOW_MOTION_FRAMES_NUM` frames. `gameLoop()` is the state-machine tick driven by the PIXI `Ticker`.
-- **`main.js`**: Bootstraps pixi (sub-package imports, not unified `pixi.js`), registers plugins on `Renderer`/`CanvasRenderer`/`Loader`, loads sprite sheet + sounds, wires UI, then starts the ticker. `forceCanvas: true` is intentional — a user hit WebGL rendering bugs, so Canvas is the only supported path.
+- **`main.js`**: Bootstraps pixi (sub-package imports, not unified `pixi.js`), registers plugins on `Renderer`/`CanvasRenderer`/`Loader`, loads sprite sheet + sounds, wires UI, then starts the ticker. `forceCanvas: true` is intentional — a user hit WebGL rendering bugs, so Canvas is the only supported path. Imports `./i18n/index.js` at the very top so the i18n module's Korean texture-path overrides land on `ASSETS_PATH.TEXTURES` *before* `loader.add(SPRITE_SHEET)` runs.
 - **`keyboard.js`**, **`audio.js`**, **`ui.js`**, **`assets_path.js`**: Support modules. `utils/` has DOM-only helpers (dark mode, embedded-in-iframe detection, localStorage wrapper).
+- **`i18n/`**: Runtime locale resolution + DOM translation. `i18n/index.js` resolves the locale (URL `?lang=` → localStorage `pv-locale` → `navigator.language` → `en`), applies the Korean texture overrides synchronously at module load (the same 7 overrides previously in `src/ko/ko.js`), then on DOM ready walks `[data-i18n]` / `[data-i18n-html]` / `[data-i18n-attr]` and wires `[data-locale]` buttons to `setLocale()` (which persists + reloads with `?lang=`). `i18n/translations.js` holds the `{en, ko, zh}` dictionary (~90 keys).
 
 ### PixiJS version
 
@@ -33,7 +34,17 @@ MVC split, all under `src/resources/js/`:
 
 ### Build layout
 
-`webpack.common.js` produces four entry bundles (`main`, `ko`, `dark_color_scheme`, `is_embedded_in_other_website`) with a shared `runtime` chunk so the Korean locale bundle can share code with the main bundle. Three locale HTML outputs (`en/`, `ko/`, `zh/`) are generated via `HtmlWebpackPlugin`, each picking a different subset of chunks. `WorkboxPlugin.GenerateSW` emits `sw.js` for PWA caching. Assets (sprites, sounds, manifests, style.css, root `index.html`) are copied through `CopyPlugin` — changes to their source paths must be mirrored in `webpack.common.js`.
+`vite.config.js` has `root: 'src'`, `publicDir: '../public'`, `base: './'` (relative URLs for sub-path portability), and two HTML inputs in `rollupOptions.input`: `src/index.html` (main page) and `src/update-history/index.html`. Each HTML loads exactly one entry script (`src/index.js`, `src/update-history/index.js`) which imports the per-page modules — splitting the modules across multiple `<script type="module">` tags causes Rollup to emit empty placeholder chunks and drop one of the script tags from the rendered HTML, so do not "fan out" the script tags again.
+
+`public/` contains everything that must keep its filename at runtime: `manifest.json` and `resources/assets/**` (sprites, sounds, icons). PixiJS Loader fetches these via the relative paths in `assets_path.js` (`resources/assets/...`, no leading `..`). `src/resources/style.css` stays under `src/` and is hashed by Vite — that is fine because only HTML `<link>` tags reference it.
+
+`vite-plugin-pwa` emits `sw.js` (`generateSW` strategy, `cleanupOutdatedCaches`, `skipWaiting: false`, `manifest: false` so `public/manifest.json` is the single source of truth). The `<script type="module">` block in `src/index.html` registers the service worker via the workbox-window CDN; the call is guarded by `import.meta.env.PROD` because dev mode does not serve `sw.js`.
+
+### Locale handling
+
+There is **one** HTML per page (no `en/`, `ko/`, `zh/` subdirectories). All translatable text in `src/index.html` and `src/update-history/index.html` is annotated with `data-i18n="key"` (textContent), `data-i18n-html="key"` (innerHTML, for translations containing inline `<a>`/`<span>`), or `data-i18n-attr="alt:key.alt,src:key.src"` (attributes). The translation tables in `src/resources/js/i18n/translations.js` are typed as plain object literals, so add a key to all three locales when introducing a new string. Missing keys fall back to English.
+
+The Korean texture overrides (`messages/ko/*.png` instead of the default `messages/ja/*.png`) are applied inside `i18n/index.js` only when `currentLocale === 'ko'`. Adding more locale-specific texture variants means extending that block plus adding the assets to `public/resources/assets/images/messages/<locale>/` — but the spritesheet (`sprite_sheet.json`/`.png`) is a single atlas, so any new texture must already be packed inside it.
 
 ## Conventions
 
