@@ -21,23 +21,7 @@ export default defineConfig({
     port: 8080,
   },
   optimizeDeps: {
-    include: [
-      '@pixi/canvas-display',
-      '@pixi/canvas-prepare',
-      '@pixi/canvas-renderer',
-      '@pixi/canvas-sprite',
-      '@pixi/constants',
-      '@pixi/core',
-      '@pixi/display',
-      '@pixi/loaders',
-      '@pixi/prepare',
-      '@pixi/settings',
-      '@pixi/sound',
-      '@pixi/sprite',
-      '@pixi/sprite-animated',
-      '@pixi/spritesheet',
-      '@pixi/ticker',
-    ],
+    include: ['pixi.js', '@pixi/sound'],
   },
   plugins: [
     VitePWA({
