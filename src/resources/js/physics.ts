@@ -63,15 +63,21 @@ const NET_PILLAR_TOP_BOTTOM_Y_COORD = 192;
  */
 export const INFINITE_LOOP_LIMIT = 1000;
 
-interface PlayerSound {
-  pipikachu: boolean;
-  pika: boolean;
-  chu: boolean;
-}
+/**
+ * Sound events emitted during a single physics tick.
+ *
+ * The engine pushes these in the order they occur. Player sounds carry the
+ * player index (0 for player1, 1 for player2) so the consumer can pan stereo;
+ * ball sounds carry the ball x at the moment of emission for the same reason.
+ */
+export type SoundEvent =
+  | { kind: 'pipikachu' | 'pika' | 'chu'; playerSide: 0 | 1 }
+  | { kind: 'powerHit' | 'ballTouchesGround'; x: number };
 
-interface BallSound {
-  powerHit: boolean;
-  ballTouchesGround: boolean;
+/** Result of one {@link physicsEngine} tick. */
+export interface PhysicsTickResult {
+  isBallTouchingGround: boolean;
+  sounds: SoundEvent[];
 }
 
 /**
@@ -98,16 +104,9 @@ export class PikaPhysics {
    * run {@link physicsEngine} function with this physics object and user input
    *
    * @param userInputArray userInputArray[0]: PikaUserInput object for player 1, userInputArray[1]: PikaUserInput object for player 2
-   * @return Is ball touching ground?
    */
-  runEngineForNextFrame(userInputArray: PikaUserInput[]): boolean {
-    const isBallTouchingGround = physicsEngine(
-      this.player1,
-      this.player2,
-      this.ball,
-      userInputArray,
-    );
-    return isBallTouchingGround;
+  runEngineForNextFrame(userInputArray: PikaUserInput[]): PhysicsTickResult {
+    return physicsEngine(this.player1, this.player2, this.ball, userInputArray);
   }
 }
 
@@ -153,18 +152,6 @@ export class Player {
    * 0 or 1
    */
   computerWhereToStandBy = 0; // 0xDC
-
-  /**
-   * This property is not in the player pointers of the original source code.
-   * But for sound effect (especially for stereo sound),
-   * it is convenient way to give sound property to a Player.
-   * The original name is stereo sound.
-   */
-  sound: PlayerSound = {
-    pipikachu: false,
-    pika: false,
-    chu: false,
-  };
 
   // Fields reinitialized in initializeForNewRound; defaults are placeholders.
   /** x coord */
@@ -264,17 +251,6 @@ export class Ball {
   previousY = 0; // 0x60
   previousPreviousY = 0; // 0x64
 
-  /**
-   * this property is not in the ball pointer of the original source code.
-   * But for sound effect (especially for stereo sound),
-   * it is convenient way to give sound property to a Ball.
-   * The original name is stereo sound.
-   */
-  sound: BallSound = {
-    powerHit: false,
-    ballTouchesGround: false,
-  };
-
   // Fields reinitialized in initializeForNewRound; defaults are placeholders.
   /** x coord */
   x = 0; // 0x30
@@ -323,15 +299,15 @@ export class Ball {
  * @param player2 player on the right side
  * @param ball ball
  * @param userInputArray userInputArray[0]: user input for player 1, userInputArray[1]: user input for player 2
- * @return Is ball touching ground?
  */
 function physicsEngine(
   player1: Player,
   player2: Player,
   ball: Ball,
   userInputArray: PikaUserInput[],
-): boolean {
-  const isBallTouchingGround = processCollisionBetweenBallAndWorldAndSetBallPosition(ball);
+): PhysicsTickResult {
+  const sounds: SoundEvent[] = [];
+  const isBallTouchingGround = processCollisionBetweenBallAndWorldAndSetBallPosition(ball, sounds);
 
   let player: Player;
   let theOtherPlayer: Player;
@@ -353,7 +329,7 @@ function physicsEngine(
 
     const userInput = userInputArray[i];
     if (userInput === undefined) continue;
-    processPlayerMovementAndSetPlayerPosition(player, userInput, theOtherPlayer, ball);
+    processPlayerMovementAndSetPlayerPosition(player, userInput, theOtherPlayer, ball, sounds);
 
     // FUN_00402830 omitted
     // FUN_00406020 omitted
@@ -374,7 +350,7 @@ function physicsEngine(
       if (player.isCollisionWithBallHappened === false) {
         const userInput = userInputArray[i];
         if (userInput !== undefined) {
-          processCollisionBetweenBallAndPlayer(ball, player.x, userInput, player.state);
+          processCollisionBetweenBallAndPlayer(ball, player.x, userInput, player.state, sounds);
           player.isCollisionWithBallHappened = true;
         }
       }
@@ -387,7 +363,7 @@ function physicsEngine(
   // FUN_00406020
   // These two functions omitted above maybe participate in graphic drawing for a player
 
-  return isBallTouchingGround;
+  return { isBallTouchingGround, sounds };
 }
 
 /**
@@ -414,7 +390,10 @@ function isCollisionBetweenBallAndPlayerHappened(
  * Process collision between ball and world and set ball position
  * @return Is ball touching ground?
  */
-function processCollisionBetweenBallAndWorldAndSetBallPosition(ball: Ball): boolean {
+function processCollisionBetweenBallAndWorldAndSetBallPosition(
+  ball: Ball,
+  sounds: SoundEvent[],
+): boolean {
   // This is not part of this function in the original assembly code.
   // In the original assembly code, it is processed in other function (FUN_00402ee0)
   // But it is proper to process here.
@@ -488,7 +467,7 @@ function processCollisionBetweenBallAndWorldAndSetBallPosition(ball: Ball): bool
     // i.e. horizontal displacement from net maybe for stereo sound?
     // code function (ballpointer + 0x28 + 0x10)? omitted
     // the omitted two functions maybe do a part of sound playback role.
-    ball.sound.ballTouchesGround = true;
+    sounds.push({ kind: 'ballTouchesGround', x: ball.x });
 
     ball.yVelocity = -ball.yVelocity;
     ball.punchEffectX = ball.x;
@@ -513,7 +492,9 @@ function processPlayerMovementAndSetPlayerPosition(
   userInput: PikaUserInput,
   theOtherPlayer: Player,
   ball: Ball,
+  sounds: SoundEvent[],
 ): void {
+  const playerSide: 0 | 1 = player.isPlayer2 ? 1 : 0;
   if (player.isComputer === true) {
     letComputerDecideUserInput(player, ball, theOtherPlayer, userInput);
   }
@@ -570,7 +551,7 @@ function processPlayerMovementAndSetPlayerPosition(
     // maybe-stereo-sound function FUN_00408470 (0x90) omitted:
     // refer to a detailed comment above about this function
     // maybe-sound code function (playerpointer + 0x90 + 0x10)? omitted
-    player.sound.chu = true;
+    sounds.push({ kind: 'chu', playerSide });
   }
 
   // gravity
@@ -604,7 +585,7 @@ function processPlayerMovementAndSetPlayerPosition(
       // maybe-stereo-sound function FUN_00408470 (0x90) omitted:
       // refer to a detailed comment above about this function
       // maybe-sound function (playerpointer + 0x90 + 0x14)? omitted
-      player.sound.pika = true;
+      sounds.push({ kind: 'pika', playerSide });
     } else if (player.state === 0 && userInput.xDirection !== 0) {
       // then player do diving!
       player.state = 3;
@@ -614,7 +595,7 @@ function processPlayerMovementAndSetPlayerPosition(
       // maybe-stereo-sound function FUN_00408470 (0x90) omitted:
       // refer to a detailed comment above about this function
       // maybe-sound code function (playerpointer + 0x90 + 0x10)? omitted
-      player.sound.chu = true;
+      sounds.push({ kind: 'chu', playerSide });
     }
   }
 
@@ -649,7 +630,7 @@ function processPlayerMovementAndSetPlayerPosition(
         // maybe-stereo-sound function FUN_00408470 (0x90) omitted:
         // refer to a detailed comment above about this function
         // maybe-sound code function (0x98 + 0x10) omitted
-        player.sound.pipikachu = true;
+        sounds.push({ kind: 'pipikachu', playerSide });
       } else {
         player.state = 6;
       }
@@ -686,6 +667,7 @@ function processCollisionBetweenBallAndPlayer(
   playerX: number,
   userInput: PikaUserInput,
   playerState: number,
+  sounds: SoundEvent[],
 ): void {
   // playerX is pika's x position
   // if collision occur,
@@ -726,7 +708,7 @@ function processCollisionBetweenBallAndPlayer(
     // maybe-stereo-sound function FUN_00408470 (0x90) omitted:
     // refer to a detailed comment above about this function
     // maybe-soundcode function (ballpointer + 0x24 + 0x10) omitted:
-    ball.sound.powerHit = true;
+    sounds.push({ kind: 'powerHit', x: ball.x });
 
     ball.isPowerHit = true;
   } else {

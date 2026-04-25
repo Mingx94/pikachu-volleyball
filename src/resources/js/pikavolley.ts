@@ -3,12 +3,16 @@
  */
 import type { Container, Spritesheet } from 'pixi.js';
 import type { Sound } from '@pixi/sound';
-import { GROUND_HALF_WIDTH, PikaPhysics } from './physics.js';
+import { GROUND_HALF_WIDTH, PikaPhysics, type SoundEvent } from './physics.js';
 import { MenuView, GameView, FadeInOut, IntroView } from './view.js';
 import { PikaKeyboard } from './keyboard.js';
 import { PikaAudio } from './audio.js';
 
 export type GameState = () => void;
+
+const sideToPan = (side: 0 | 1): -1 | 1 => (side === 0 ? -1 : 1);
+const xToPan = (x: number): -1 | 0 | 1 =>
+  x < GROUND_HALF_WIDTH ? -1 : x > GROUND_HALF_WIDTH ? 1 : 0;
 
 interface FrameTotal {
   intro: number;
@@ -329,9 +333,9 @@ export class PikachuVolleyball {
       return;
     }
 
-    const isBallTouchingGround = this.physics.runEngineForNextFrame(this.keyboardArray);
+    const { isBallTouchingGround, sounds } = this.physics.runEngineForNextFrame(this.keyboardArray);
 
-    this.playSoundEffect();
+    this.playSoundEffect(sounds);
     this.view.game.drawPlayersAndBall(this.physics);
     this.view.game.drawCloudsAndWave();
 
@@ -431,46 +435,28 @@ export class PikachuVolleyball {
     }
   }
 
-  /** Play sound effect on {@link round} */
-  playSoundEffect(): void {
+  /** Play sound effects emitted by the physics engine during {@link round} */
+  playSoundEffect(events: SoundEvent[]): void {
     const audio = this.audio;
-    for (let i = 0; i < 2; i++) {
-      const player = i === 0 ? this.physics.player1 : this.physics.player2;
-      const sound = player.sound;
-      let leftOrCenterOrRight = 0;
-      if (this.isStereoSound) {
-        leftOrCenterOrRight = i === 0 ? -1 : 1;
+    const stereo = this.isStereoSound;
+    for (const event of events) {
+      switch (event.kind) {
+        case 'pipikachu':
+          audio.sounds.pipikachu.play(stereo ? sideToPan(event.playerSide) : 0);
+          break;
+        case 'pika':
+          audio.sounds.pika.play(stereo ? sideToPan(event.playerSide) : 0);
+          break;
+        case 'chu':
+          audio.sounds.chu.play(stereo ? sideToPan(event.playerSide) : 0);
+          break;
+        case 'powerHit':
+          audio.sounds.powerHit.play(stereo ? xToPan(event.x) : 0);
+          break;
+        case 'ballTouchesGround':
+          audio.sounds.ballTouchesGround.play(stereo ? xToPan(event.x) : 0);
+          break;
       }
-      if (sound.pipikachu === true) {
-        audio.sounds.pipikachu.play(leftOrCenterOrRight);
-        sound.pipikachu = false;
-      }
-      if (sound.pika === true) {
-        audio.sounds.pika.play(leftOrCenterOrRight);
-        sound.pika = false;
-      }
-      if (sound.chu === true) {
-        audio.sounds.chu.play(leftOrCenterOrRight);
-        sound.chu = false;
-      }
-    }
-    const ball = this.physics.ball;
-    const sound = ball.sound;
-    let leftOrCenterOrRight = 0;
-    if (this.isStereoSound) {
-      if (ball.punchEffectX < GROUND_HALF_WIDTH) {
-        leftOrCenterOrRight = -1;
-      } else if (ball.punchEffectX > GROUND_HALF_WIDTH) {
-        leftOrCenterOrRight = 1;
-      }
-    }
-    if (sound.powerHit === true) {
-      audio.sounds.powerHit.play(leftOrCenterOrRight);
-      sound.powerHit = false;
-    }
-    if (sound.ballTouchesGround === true) {
-      audio.sounds.ballTouchesGround.play(leftOrCenterOrRight);
-      sound.ballTouchesGround = false;
     }
   }
 
