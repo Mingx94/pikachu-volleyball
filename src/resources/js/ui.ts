@@ -1,7 +1,7 @@
 /**
  * Manages event listeners relevant to the UI (menu bar, buttons, etc.) of the web page
  */
-import type { Ticker } from '@pixi/ticker';
+import type { Ticker } from 'pixi.js';
 import { localStorageWrapper } from './utils/local_storage_wrapper.js';
 import type { PikachuVolleyball } from './pikavolley.js';
 

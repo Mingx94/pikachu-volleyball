@@ -1,8 +1,8 @@
 /**
  * The Controller part in MVC pattern
  */
-import type { Container } from '@pixi/display';
-import type { LoaderResource } from '@pixi/loaders';
+import type { Container, Spritesheet } from 'pixi.js';
+import type { Sound } from '@pixi/sound';
 import { GROUND_HALF_WIDTH, PikaPhysics } from './physics.js';
 import { MenuView, GameView, FadeInOut, IntroView } from './view.js';
 import { PikaKeyboard } from './keyboard.js';
@@ -94,15 +94,16 @@ export class PikachuVolleyball {
 
   /**
    * Create a Pikachu Volleyball game which includes physics, view, audio
-   * @param stage container which is rendered by PIXI.Renderer or PIXI.CanvasRenderer
-   * @param resources resources property of the PIXI.Loader object which is used for loading the game resources
+   * @param stage container that the application's renderer draws each tick
+   * @param sheet loaded spritesheet
+   * @param sounds map keyed by sound URL → loaded `Sound`
    */
-  constructor(stage: Container, resources: Record<string, LoaderResource>) {
+  constructor(stage: Container, sheet: Spritesheet, sounds: Record<string, Sound>) {
     this.view = {
-      intro: new IntroView(resources),
-      menu: new MenuView(resources),
-      game: new GameView(resources),
-      fadeInOut: new FadeInOut(resources),
+      intro: new IntroView(sheet),
+      menu: new MenuView(sheet),
+      game: new GameView(sheet),
+      fadeInOut: new FadeInOut(sheet),
     };
     stage.addChild(this.view.intro.container);
     stage.addChild(this.view.menu.container);
@@ -113,7 +114,7 @@ export class PikachuVolleyball {
     this.view.game.visible = false;
     this.view.fadeInOut.visible = false;
 
-    this.audio = new PikaAudio(resources);
+    this.audio = new PikaAudio(sounds);
     this.physics = new PikaPhysics(true, true);
     this.keyboardArray = [
       new PikaKeyboard('KeyD', 'KeyG', 'KeyR', 'KeyV', 'KeyZ', 'KeyF'), // for player1

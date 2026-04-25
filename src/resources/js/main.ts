@@ -27,60 +27,40 @@
  *  - "assets_path.ts": For the assets (image files, sound files) locations.
  *  - "ui.ts": For the user interface (menu bar, buttons etc.) of the html page.
  */
-// i18n must run before any @pixi/* import: it applies the Korean texture path
-// overrides on `ASSETS_PATH.TEXTURES` synchronously, before main.ts queues
-// the spritesheet on the PixiJS Loader.
+// i18n must run first: it applies the Korean texture-key overrides on
+// `ASSETS_PATH.TEXTURES` synchronously, before main.ts queues the spritesheet
+// on `Assets.load`.
 import './i18n/index.js';
-import { settings } from '@pixi/settings';
-import { SCALE_MODES } from '@pixi/constants';
-import { Renderer, BatchRenderer, autoDetectRenderer } from '@pixi/core';
-import { Prepare } from '@pixi/prepare';
-import { Container } from '@pixi/display';
-import { Loader } from '@pixi/loaders';
-import { SpritesheetLoader } from '@pixi/spritesheet';
-import { Ticker } from '@pixi/ticker';
-import { CanvasRenderer } from '@pixi/canvas-renderer';
-import { CanvasSpriteRenderer } from '@pixi/canvas-sprite';
-import { CanvasPrepare } from '@pixi/canvas-prepare';
-import '@pixi/canvas-display';
+import { Application, Assets, Spritesheet, TextureStyle } from 'pixi.js';
+import type { Sound } from '@pixi/sound';
+import '@pixi/sound'; // side-effect: registers the sound Assets parser
 import { PikachuVolleyball } from './pikavolley.js';
 import { ASSETS_PATH } from './assets_path.js';
 import { setUpUI } from './ui.js';
 
-// Reference for how to use Renderer.registerPlugin:
-// https://github.com/pixijs/pixijs/blob/af3c0c6bb15aeb1049178c972e4a14bb4cabfce4/bundles/pixi.js/src/index.ts#L27-L34
-Renderer.registerPlugin('prepare', Prepare);
-Renderer.registerPlugin('batch', BatchRenderer);
-// Reference for how to use CanvasRenderer.registerPlugin:
-// https://github.com/pixijs/pixijs/blob/af3c0c6bb15aeb1049178c972e4a14bb4cabfce4/bundles/pixi.js-legacy/src/index.ts#L13-L19
-CanvasRenderer.registerPlugin('prepare', CanvasPrepare);
-CanvasRenderer.registerPlugin('sprite', CanvasSpriteRenderer);
-Loader.registerPlugin(SpritesheetLoader);
+// Set the default scale mode to 'nearest' before any texture is loaded so the
+// pixel-art spritesheet keeps crisp edges. Resolution: 2 keeps the canvas sharp
+// when the browser is asked to bilinear-scale it ("soft" graphic option).
+TextureStyle.defaultOptions.scaleMode = 'nearest';
 
-// Set settings.RESOLUTION to 2 instead of 1 to make the game screen do not look
-// much blurry in case of the image rendering mode of 'image-rendering: auto',
-// which is like bilinear interpolation, which is used in "soft" game graphic option.
-settings.RESOLUTION = 2;
-settings.SCALE_MODE = SCALE_MODES.NEAREST;
-settings.ROUND_PIXELS = true;
-
-const renderer = autoDetectRenderer({
+const app = new Application();
+await app.init({
   width: 432,
   height: 304,
   antialias: false,
-  backgroundColor: 0x000000,
+  background: 0x000000,
   backgroundAlpha: 1,
-  // Decided to use only Canvas for compatibility reason. One player had reported that
-  // on their browser, where pixi chooses to use WebGL renderer, the graphics are not fine.
-  // And the issue had been fixed by using Canvas renderer. And also for the sake of testing,
-  // it is more comfortable just to stick with Canvas renderer so that it is unnecessary to switch
-  // between WebGL renderer and Canvas renderer.
-  forceCanvas: true,
+  resolution: 2,
+  roundPixels: true,
+  preference: 'webgl',
 });
 
-const stage = new Container();
-const ticker = new Ticker();
-const loader = new Loader();
+const canvas = app.canvas;
+canvas.id = 'game-canvas';
+getEl('game-canvas-container').appendChild(canvas);
+app.renderer.render(app.stage); // To make the initial canvas painting stable in the Firefox browser.
+
+setUpInitialUI();
 
 function getEl(id: string): HTMLElement {
   const e = document.getElementById(id);
@@ -88,29 +68,12 @@ function getEl(id: string): HTMLElement {
   return e;
 }
 
-renderer.view.setAttribute('id', 'game-canvas');
-getEl('game-canvas-container').appendChild(renderer.view);
-renderer.render(stage); // To make the initial canvas painting stable in the Firefox browser.
-
-loader.add(ASSETS_PATH.SPRITE_SHEET);
-for (const url of Object.values(ASSETS_PATH.SOUNDS)) {
-  loader.add(url);
-}
-
-setUpInitialUI();
-
 /**
  * Set up the initial UI.
  */
 function setUpInitialUI(): void {
   const loadingBox = getEl('loading-box');
   const progressBar = getEl('progress-bar');
-  loader.onProgress.add(() => {
-    progressBar.style.width = `${loader.progress}%`;
-  });
-  loader.onComplete.add(() => {
-    loadingBox.classList.add('hidden');
-  });
 
   const aboutBox = getEl('about-box');
   const aboutBtn = getEl('about-btn') as HTMLButtonElement;
@@ -131,32 +94,41 @@ function setUpInitialUI(): void {
     closeAboutBtn.getElementsByClassName('text-close')[0]?.classList.remove('hidden');
     closeAboutBtn.classList.remove('glow');
 
-    loader.load(setup); // setup is called after loader finishes loading
     loadingBox.classList.remove('hidden');
     aboutBtn.removeEventListener('click', closeAboutBox);
     closeAboutBtn.removeEventListener('click', closeAboutBox);
+
+    void loadAndStart(progressBar, loadingBox);
   };
   aboutBtn.addEventListener('click', closeAboutBox);
   closeAboutBtn.addEventListener('click', closeAboutBox);
 }
 
 /**
- * Set up the game and the full UI, and start the game.
+ * Load the spritesheet and sounds, then set up the game and start the ticker.
  */
-function setup(): void {
-  const pikaVolley = new PikachuVolleyball(stage, loader.resources);
-  setUpUI(pikaVolley, ticker);
-  start(pikaVolley);
-}
-
-/**
- * Start the game.
- */
-function start(pikaVolley: PikachuVolleyball): void {
-  ticker.maxFPS = pikaVolley.normalFPS;
-  ticker.add(() => {
-    pikaVolley.gameLoop();
-    renderer.render(stage);
+async function loadAndStart(progressBar: HTMLElement, loadingBox: HTMLElement): Promise<void> {
+  // `Assets.load` has two overloads; the first one (`urls: string | UnresolvedAsset`)
+  // shadows the array form because `UnresolvedAsset` carries an open `[key: string]: any`
+  // index signature. Annotating the result picks the second overload's return type.
+  const urls = [ASSETS_PATH.SPRITE_SHEET, ...Object.values(ASSETS_PATH.SOUNDS)];
+  const loaded: Record<string, Spritesheet | Sound> = await Assets.load(urls, (progress) => {
+    progressBar.style.width = `${Math.round(progress * 100)}%`;
   });
-  ticker.start();
+  loadingBox.classList.add('hidden');
+
+  const sheet = loaded[ASSETS_PATH.SPRITE_SHEET] as Spritesheet;
+  const sounds: Record<string, Sound> = {};
+  for (const url of Object.values(ASSETS_PATH.SOUNDS)) {
+    sounds[url] = loaded[url] as Sound;
+  }
+
+  const pikaVolley = new PikachuVolleyball(app.stage, sheet, sounds);
+  setUpUI(pikaVolley, app.ticker);
+  app.ticker.maxFPS = pikaVolley.normalFPS;
+  // Application's TickerPlugin auto-renders the stage each tick, so this
+  // callback only needs to drive the game-state machine.
+  app.ticker.add(() => {
+    pikaVolley.gameLoop();
+  });
 }

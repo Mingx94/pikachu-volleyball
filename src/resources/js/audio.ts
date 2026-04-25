@@ -2,7 +2,6 @@
  * This module takes charge of the game audio (or sounds)
  */
 import { sound, Sound, filters } from '@pixi/sound';
-import type { LoaderResource } from '@pixi/loaders';
 import { ASSETS_PATH } from './assets_path.js';
 
 const SOUNDS = ASSETS_PATH.SOUNDS;
@@ -21,12 +20,12 @@ type SoundKey = (typeof SOUND_KEYS)[number];
 
 type Sounds = { [K in SoundKey]: PikaStereoSound };
 
-function getSound(resources: Record<string, LoaderResource>, key: string): Sound {
-  const res = resources[key];
-  if (!res || !res.sound) {
+function getSound(sounds: Record<string, Sound>, key: string): Sound {
+  const s = sounds[key];
+  if (!s) {
     throw new Error(`Sound not loaded: ${key}`);
   }
-  return res.sound;
+  return s;
 }
 
 /**
@@ -41,18 +40,18 @@ export class PikaAudio {
 
   /**
    * Create a PikaAudio object
-   * @param resources loader.resources
+   * @param sounds map keyed by sound URL → loaded `Sound`
    */
-  constructor(resources: Record<string, LoaderResource>) {
+  constructor(sounds: Record<string, Sound>) {
     this.sounds = {
-      bgm: new PikaStereoSound(getSound(resources, SOUNDS.BGM)),
-      pipikachu: new PikaStereoSound(getSound(resources, SOUNDS.PIPIKACHU)),
-      pika: new PikaStereoSound(getSound(resources, SOUNDS.PIKA)),
-      chu: new PikaStereoSound(getSound(resources, SOUNDS.CHU)),
-      pi: new PikaStereoSound(getSound(resources, SOUNDS.PI)),
-      pikachu: new PikaStereoSound(getSound(resources, SOUNDS.PIKACHU)),
-      powerHit: new PikaStereoSound(getSound(resources, SOUNDS.POWERHIT)),
-      ballTouchesGround: new PikaStereoSound(getSound(resources, SOUNDS.BALLTOUCHESGROUND)),
+      bgm: new PikaStereoSound(getSound(sounds, SOUNDS.BGM)),
+      pipikachu: new PikaStereoSound(getSound(sounds, SOUNDS.PIPIKACHU)),
+      pika: new PikaStereoSound(getSound(sounds, SOUNDS.PIKA)),
+      chu: new PikaStereoSound(getSound(sounds, SOUNDS.CHU)),
+      pi: new PikaStereoSound(getSound(sounds, SOUNDS.PI)),
+      pikachu: new PikaStereoSound(getSound(sounds, SOUNDS.PIKACHU)),
+      powerHit: new PikaStereoSound(getSound(sounds, SOUNDS.POWERHIT)),
+      ballTouchesGround: new PikaStereoSound(getSound(sounds, SOUNDS.BALLTOUCHESGROUND)),
     };
 
     this.sounds.bgm.loop = true;

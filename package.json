@@ -29,26 +29,13 @@
     "@types/node": "^25.6.0",
     "oxfmt": "^0.46.0",
     "oxlint": "^1.61.0",
-    "typescript": "^6.0.0",
+    "typescript": "^6.0.3",
     "vite": "^8.0.10",
     "vite-plugin-pwa": "^1.2.0"
   },
   "dependencies": {
-    "@pixi/canvas-display": "^6.4.2",
-    "@pixi/canvas-prepare": "^6.4.2",
-    "@pixi/canvas-renderer": "^6.4.2",
-    "@pixi/canvas-sprite": "^6.4.2",
-    "@pixi/constants": "^6.4.2",
-    "@pixi/core": "^6.4.2",
-    "@pixi/display": "^6.4.2",
-    "@pixi/loaders": "^6.4.2",
-    "@pixi/prepare": "^6.4.2",
-    "@pixi/settings": "^6.4.2",
-    "@pixi/sound": "^4.2.1",
-    "@pixi/sprite": "^6.4.2",
-    "@pixi/sprite-animated": "^6.4.2",
-    "@pixi/spritesheet": "^6.4.2",
-    "@pixi/ticker": "^6.4.2"
+    "@pixi/sound": "^6.0.1",
+    "pixi.js": "^8.18.1"
   },
   "overrides": {
     "vite-plugin-pwa": {

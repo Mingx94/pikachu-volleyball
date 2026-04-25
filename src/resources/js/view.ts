@@ -5,11 +5,7 @@
  * The codes gained by reverse engineering are commented by the address of the function referred to in the machine code.
  * ex) FUN_00405d50 means the function at the address 00405d50 in the machine code.
  */
-import { AnimatedSprite } from '@pixi/sprite-animated';
-import { Sprite } from '@pixi/sprite';
-import { Container } from '@pixi/display';
-import type { LoaderResource } from '@pixi/loaders';
-import type { Texture } from '@pixi/core';
+import { AnimatedSprite, Container, Sprite, Spritesheet, Texture } from 'pixi.js';
 import { Cloud, Wave, cloudAndWaveEngine } from './cloud_and_wave.js';
 import { ASSETS_PATH } from './assets_path.js';
 import type { PikaPhysics } from './physics.js';
@@ -21,11 +17,7 @@ type TextureDict = Record<string, Texture>;
 /** number of clouds to be rendered */
 const NUM_OF_CLOUDS = 10;
 
-function getSheetTextures(resources: Record<string, LoaderResource>): TextureDict {
-  const sheet = resources[ASSETS_PATH.SPRITE_SHEET];
-  if (!sheet || !sheet.textures) {
-    throw new Error(`Spritesheet not loaded: ${ASSETS_PATH.SPRITE_SHEET}`);
-  }
+function getSheetTextures(sheet: Spritesheet): TextureDict {
   return sheet.textures as TextureDict;
 }
 
@@ -44,10 +36,10 @@ export class IntroView {
 
   /**
    * Create an IntroView object
-   * @param resources loader.resources
+   * @param sheet loaded spritesheet
    */
-  constructor(resources: Record<string, LoaderResource>) {
-    const textures = getSheetTextures(resources);
+  constructor(sheet: Spritesheet) {
+    const textures = getSheetTextures(sheet);
 
     this.mark = makeSpriteWithAnchorXY(textures, TEXTURES.MARK, 0.5, 0.5);
     this.mark.x = 432 / 2;
@@ -104,10 +96,10 @@ export class MenuView {
 
   /**
    * Create a MenuView object
-   * @param resources loader.resources
+   * @param sheet loaded spritesheet
    */
-  constructor(resources: Record<string, LoaderResource>) {
-    const textures = getSheetTextures(resources);
+  constructor(sheet: Spritesheet) {
+    const textures = getSheetTextures(sheet);
 
     this.messages = {
       pokemon: makeSpriteWithAnchorXY(textures, TEXTURES.POKEMON, 0, 0),
@@ -369,8 +361,8 @@ export class GameView {
   cloudArray: Cloud[];
   wave: Wave;
 
-  constructor(resources: Record<string, LoaderResource>) {
-    const textures = getSheetTextures(resources);
+  constructor(sheet: Spritesheet) {
+    const textures = getSheetTextures(sheet);
 
     // Display objects below
     this.bgContainer = makeBGContainer(textures);
@@ -663,8 +655,8 @@ export class GameView {
 export class FadeInOut {
   black: Sprite;
 
-  constructor(resources: Record<string, LoaderResource>) {
-    const textures = getSheetTextures(resources);
+  constructor(sheet: Spritesheet) {
+    const textures = getSheetTextures(sheet);
     this.black = makeSpriteWithAnchorXY(textures, TEXTURES.BLACK, 0, 0);
     this.black.width = 432;
     this.black.height = 304;

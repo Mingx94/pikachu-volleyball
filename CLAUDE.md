@@ -24,7 +24,7 @@ MVC 拆分，全部位於 `src/resources/js/`：
 - **Model — `cloud_and_wave.ts`**：同樣是逆向工程出來的，驅動背景的雲與波浪動畫，由 `view.ts` 渲染。
 - **View — `view.ts`**：PixiJS 渲染。`IntroView`、`MenuView`、`GameView`、`FadeInOut` 在 `pikavolley.ts` 裡被掛到 root stage 之下。內部用了 `getSheetTextures` / `getTexture` 兩個小 helper 在邊界處 throw，避免在整個檔案散布 `!` 非空斷言。
 - **Controller — `pikavolley.ts`**：`PikachuVolleyball` class 擁有 physics、view、audio 與兩個 `PikaKeyboard`。以 `normalFPS = 25` 執行；回合結束後的慢動作會降到 `slowMotionFPS = 5` 持續 `SLOW_MOTION_FRAMES_NUM` 個 frame。`gameLoop()` 是由 PIXI `Ticker` 驅動的狀態機 tick。`state: GameState` 是個 function reference（`= () => void`），會在 method 之間互相重新指派（`intro` / `menu` / `round` 等）— 透過 property 呼叫 `this.state()` 時 `this` 會正確 rebind。
-- **`main.ts`**：bootstrap pixi（用拆開的 sub-package import，不用合併的 `pixi.js`），把 plugin 註冊到 `Renderer` / `CanvasRenderer` / `Loader`，載入 sprite sheet 與聲音，接好 UI，然後啟動 ticker。`forceCanvas: true` 是刻意的 — 有玩家回報過 WebGL 渲染 bug，所以 Canvas 是唯一支援的路徑。在最頂端 import `./i18n/index.js`，這樣 i18n 模組對韓文 texture 路徑的覆寫會在 `loader.add(SPRITE_SHEET)` 之前先寫入 `ASSETS_PATH.TEXTURES`。
+- **`main.ts`**：bootstrap pixi（合併的 `pixi.js` import + 從 `@pixi/sound` 拿 `Sound` 型別並 side-effect import 註冊 sound 的 Assets parser），`new Application()` 之後 `await app.init({ preference: 'webgl', ... })`，用 `Assets.load([SPRITE_SHEET, ...SOUNDS], onProgress)` 一次載完 spritesheet 與聲音，接好 UI，最後 `app.ticker.add(() => pikaVolley.gameLoop())` — `Application` 的 TickerPlugin 會自動 render，`gameLoop` 不要再呼叫 `renderer.render()`。在最頂端 import `./i18n/index.js`，這樣 i18n 模組對韓文 texture 路徑的覆寫會在 `Assets.load(SPRITE_SHEET)` 之前先寫入 `ASSETS_PATH.TEXTURES`（spritesheet frame key 在 sprite 建立時才會被 view.ts 查找）。
 - **`keyboard.ts`**、**`audio.ts`**、**`ui.ts`**、**`assets_path.ts`**：支援模組。`utils/` 裡放純 DOM 的 helper（dark mode、是否被嵌入別的網站、localStorage wrapper）。
 - **`i18n/`**：執行時的 locale 解析 + DOM 翻譯。`i18n/index.ts` 解析 locale（URL `?lang=` → localStorage `pv-locale` → `navigator.language` → `en`），在 module load 時同步套用韓文 texture 覆寫，DOM ready 之後巡訪 `[data-i18n]` / `[data-i18n-html]` / `[data-i18n-attr]`，並把 `[data-locale]` 按鈕接到 `setLocale()`（會持久化並用 `?lang=` 重新載入）。`i18n/translations.ts` 持有 `Record<Locale, Record<string, string>>` 的字典（約 90 個 key）。
 
@@ -34,7 +34,13 @@ MVC 拆分，全部位於 `src/resources/js/`：
 
 ### PixiJS 版本
 
-**這個專案用的是 PixiJS v6**，透過拆開的 `@pixi/*` sub-package（`@pixi/core`、`@pixi/display`、`@pixi/loaders`、`@pixi/sprite-animated`、`@pixi/sound` 等）。本 repo 裡 `.claude/skills/pixijs*` 描述的是 **PixiJS v8**，那個版本 API 完全不同（合併的 `pixi.js` import、async `app.init()`、Graphics 是「先形狀再填色」、`Assets` API 等等）。**不要**把那些 v8 模式套到本 codebase 上 — 跟著現有的 v6 慣用法（`Loader`、`Renderer.registerPlugin`、`new Container()` 等）。
+**這個專案用的是 PixiJS v8**（`pixi.js@^8`，合併套件，不再是 v6 那批拆開的 `@pixi/*` sub-package）+ `@pixi/sound@^6`（對應 v8 的 sound 套件）。本 repo 裡 `.claude/skills/pixijs*` 描述的就是 v8，可以直接當參考。要點：
+
+- bootstrap 是 `new Application()` + `await app.init(...)` 兩段式，`main.ts` 用 top-level await。
+- 資源用 `Assets.load(urls, onProgress)`，一次拿到 spritesheet 與 sounds（`@pixi/sound` 的 side-effect import 會自動把 sound parser 註冊到 Assets）。沒有 `Loader` 也沒有 `*.registerPlugin`。
+- 全域預設 scale mode 改在 `TextureStyle.defaultOptions.scaleMode = 'nearest'` 設定，必須在 `Assets.load` 之前（spritesheet texture 從 default 繼承）。`resolution` / `roundPixels` 都改傳到 `app.init` 的 options。
+- Renderer 強制走 WebGL（`preference: 'webgl'`）。v8 已移除 Canvas-only renderer，所以沒有 `forceCanvas` 可用；如果之後再有玩家回報 WebGL 渲染問題，請評估特定 driver workaround、或加 `preference: ['webgl', 'webgpu']` fallback，而不是嘗試走 canvas。
+- `app.ticker` 由 `Application` 內建的 TickerPlugin 每 tick 自動 render stage，所以 ticker callback 內**不要**再呼叫 `renderer.render(stage)`，否則會 double render。`gameLoop()` 是 frame-rate-driven 的固定步狀態機，沒有讀 deltaTime，所以 v8 把 `Ticker` instance 而非 `delta` 數字傳給 callback 對本專案沒影響。
 
 ### TypeScript 設定
 
@@ -65,6 +71,6 @@ MVC 拆分，全部位於 `src/resources/js/`：
 
 - 原始檔都是 `.ts`（沒有 `'use strict';` — TS 模組預設就是 strict）。
 - **Formatter — oxfmt**（`.oxfmtrc.json`）：`singleQuote: true`、`endOfLine: lf`。其他預設值大致與 Prettier 對齊。
-- **Linter — oxlint**（`oxlint.config.ts`）：啟用 `typescript`、`unicorn`、`import` plugins，套用 `correctness: error` / `suspicious: warn` 兩個 category，外加明確的 `eqeqeq` 與 `prefer-const`。`import/no-unassigned-import` 被**關閉**，因為專案有幾個刻意的 side-effect import（`./i18n/index.js`、`@pixi/canvas-display` 等）。
+- **Linter — oxlint**（`oxlint.config.ts`）：啟用 `typescript`、`unicorn`、`import` plugins，套用 `correctness: error` / `suspicious: warn` 兩個 category，外加明確的 `eqeqeq` 與 `prefer-const`。`import/no-unassigned-import` 被**關閉**，因為專案有幾個刻意的 side-effect import（`./i18n/index.js`、`@pixi/sound` 等）。
 - 型別用 TS 語法表達（interface、`Record<...>`、`[number, number]` 之類的 tuple 型別、`as const` 字面量物件等）。JSDoc 拿來寫描述沒問題，但已經不再是型別的真正來源。
 - 修改 `physics.ts` / `cloud_and_wave.ts` 時，請保留位址註解與 bit-trick 整數運算；這些是忠實移植，不是慣用 JS。`docs/engine/` 的詳細分析記錄了哪些行為是刻意保留的 quirk。
