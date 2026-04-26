@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest';
+import { Cloud, Wave, cloudAndWaveEngine } from './cloud_and_wave.js';
 import { PikaPhysics, PikaUserInput } from './physics.js';
-import { setCustomRng } from './rand.js';
+import { rand, setCustomRng } from './rand.js';
 import {
   buildReplay,
   deserializeReplay,
@@ -293,6 +294,82 @@ describe('multi-round replay', () => {
       roundReInits: [{ atFrame: 3, isPlayer2Serve: false }],
     });
     expect(multi.roundReInits).toEqual([{ atFrame: 3, isPlayer2Serve: false }]);
+  });
+});
+
+describe('cloud/wave RNG isolation', () => {
+  // Pikavolley's controller calls drawCloudsAndWave() every tick of
+  // startOfNewGame, round(), and beforeStartOfNextRound(). startReplay()
+  // skips the 71-tick startOfNewGame fade-in. If cloud/wave shared the
+  // seeded `rand()`, those skipped ticks would leave the AI's RNG state
+  // off by ~71 * 27 = ~1900 calls at round-frame 0, and replay playback
+  // would diverge from recording. These tests pin that cloud/wave uses an
+  // independent rng so the seeded sequence stays stable regardless of how
+  // many cloud/wave ticks occur around it.
+  it('cloudAndWaveEngine does not consume seeded rand', () => {
+    setCustomRng(mulberry32(0x12_34_56));
+    const baseline = [rand(), rand(), rand(), rand(), rand()];
+
+    setCustomRng(mulberry32(0x12_34_56));
+    const clouds: Cloud[] = Array.from({ length: 10 }, () => new Cloud());
+    const wave = new Wave();
+    for (let i = 0; i < 200; i++) cloudAndWaveEngine(clouds, wave);
+    const afterCloudWave = [rand(), rand(), rand(), rand(), rand()];
+
+    expect(afterCloudWave).toEqual(baseline);
+  });
+
+  it('Cloud constructor does not consume seeded rand', () => {
+    setCustomRng(mulberry32(0x42));
+    const baseline = [rand(), rand(), rand()];
+
+    setCustomRng(mulberry32(0x42));
+    const sink: Cloud[] = [];
+    for (let i = 0; i < 10; i++) sink.push(new Cloud());
+    expect(sink).toHaveLength(10);
+    const after = [rand(), rand(), rand()];
+
+    expect(after).toEqual(baseline);
+  });
+
+  // Mirrors the actual production bug: the controller records frames during
+  // `round()` while drawCloudsAndWave runs every tick, then startReplay
+  // skips startOfNewGame. If cloud/wave was on the seeded rng this test
+  // would fail because the AI's recorded inputs were captured against a
+  // different rng trajectory than the one runReplay reproduces.
+  it('runReplay matches a controller-style record path that interleaves cloud/wave', () => {
+    const seed = 0xab_cd;
+    const FRAMES = 200;
+
+    setCustomRng(mulberry32(seed));
+    const recPhysics = new PikaPhysics(true, false);
+    const clouds: Cloud[] = Array.from({ length: 10 }, () => new Cloud());
+    const wave = new Wave();
+    // Simulate startOfNewGame's 71 cloud/wave ticks
+    for (let i = 0; i < 71; i++) cloudAndWaveEngine(clouds, wave);
+
+    const recFrames: Array<readonly [SerializedInput, SerializedInput]> = [];
+    const live: [PikaUserInput, PikaUserInput] = [new PikaUserInput(), new PikaUserInput()];
+    for (let i = 0; i < FRAMES; i++) {
+      // Player 2 jitters to make the recording have non-trivial input
+      live[1].xDirection = (i % 5) - 2 > 0 ? 1 : -1;
+      live[1].powerHit = i === 50 ? 1 : 0;
+      recFrames.push(snapshotInputs(live));
+      recPhysics.runEngineForNextFrame(live);
+      cloudAndWaveEngine(clouds, wave);
+    }
+
+    const replay = buildReplay({
+      seed,
+      isPlayer1Computer: true,
+      isPlayer2Computer: false,
+      frames: recFrames,
+    });
+    const replayed = runReplay(replay);
+
+    expect(replayed.ball).toEqual(recPhysics.ball);
+    expect(replayed.player1).toEqual(recPhysics.player1);
+    expect(replayed.player2).toEqual(recPhysics.player2);
   });
 });
 

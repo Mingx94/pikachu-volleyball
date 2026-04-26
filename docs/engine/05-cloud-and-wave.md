@@ -138,10 +138,11 @@ for (let i = 0; i < 432 / 16; i++) {
 嚴格來說雲和波浪只影響畫面，沒有遊戲意義。但因為：
 
 1. 它們的運動是逆向工程出來的（`FUN_00404770`），而不是現代重寫的純視覺動畫；
-2. 它們依賴 `rand()`，所以受 PRNG 重現性的影響（如果你想做完整的 deterministic replay，就需要保留這層）；
-3. 原作就是把它放在和 player/ball 並列的 model layer。
+2. 原作就是把它放在和 player/ball 並列的 model layer。
 
 所以本實作把它放在 `cloud_and_wave.ts`，由 `view.ts` 的 `GameView` 持有 10 朵 `Cloud` + 1 個 `Wave`，每 frame 呼叫 `cloudAndWaveEngine()` 後再讀座標渲染。
+
+**RNG 隔離**：原作所有 `rand()` 共用同一個 LCG，所以雲/浪的隨機抽樣會干擾物理層的 PRNG 序列。本實作刻意讓 `cloud_and_wave.ts` 用獨立的 `Math.random()` 而不是共用的 `rand()`：因為 controller 的 `startReplay` 會跳過 `startOfNewGame` 那 71 個 fade-in tick（每 tick `cloudAndWaveEngine` 消耗 ~27 個 rand），如果共用 PRNG，replay 起手 AI 的 RNG 軌跡會和錄影錯位上千個 rand，整場放出來會發散。雲與浪純視覺，所以獨立 RNG 是最便宜的解。
 
 ## 6. 數字快查
 
