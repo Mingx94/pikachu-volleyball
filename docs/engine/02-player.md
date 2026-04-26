@@ -108,7 +108,8 @@ if (!player.isPlayer2) {
 if (
   player.state < 3 &&
   userInput.yDirection === -1 && // 按上
-  player.y === PLAYER_TOUCHING_GROUND_Y_COORD // 站在地上
+  !player.hasPlayerOnHead && // 頭上沒人（2v2 用，1v1 永遠 false）
+  (player.y === PLAYER_TOUCHING_GROUND_Y_COORD || player.standingOnTeammate)
 ) {
   player.yVelocity = -16;
   player.state = 1;
@@ -120,6 +121,8 @@ if (
 跳躍是「瞬間給 -16 y 速度」，加上每 frame +1 的重力，玩家會在 2 × 16 = 32 frame 後落地（不算空氣阻力，因為沒有）。
 
 注意條件 `player.state < 3` — 這代表 state 0（待機）、1（跳躍中）、2（空中殺球）都能觸發 `yVelocity = -16`，但只在地面成立。配合 `player.y === PLAYER_TOUCHING_GROUND_Y_COORD` 的等號（不是 `<=`），代表必須**剛好**站在地上才能跳。所以 state 1（已經在跳）配合「沒落地」的時候，這條 if 不會通過 — 不會有「空中再跳」的 bug。
+
+`hasPlayerOnHead` / `standingOnTeammate` 兩個 flag 是 2v2 的擴充（見 §12），由 `processPlayerToPlayerCollisions` 每 tick 重設並依配對狀態填入。1v1 永遠走不到那輪，所以兩個 flag 維持 false，原作的「站在 244 才能跳」嚴格規則完整保留。
 
 ## 7. 重力與落地
 
@@ -239,5 +242,76 @@ if (player.gameEnded === true) {
 - `pipikachu`：勝利時播放一次
 
 Controller（`pikavolley.ts:playSoundEffect()`）讀完旗標後會呼叫 `audio.sounds.*.play()` 並把旗標重設為 false。這個設計讓引擎本身不依賴音訊系統，方便回放與測試。
+
+## 12. 2v2 隊友碰撞（本實作對原作的擴充）
+
+> 對應原始碼：`physics.ts:processPlayerToPlayerCollisions`、`resolveTeammatePair`
+> 觸發時機：`physicsEngine` 內，每 tick 玩家移動結束、球-玩家碰撞之前。
+
+原作只支援 1v1，玩家彼此不會碰撞（隔著網柱）。2v2 模式新增 4 個 slot 後，同隊的兩位皮卡丘會共享同半場 — 必須處理隊友間的碰撞。本實作的解析規則：
+
+每 tick 開頭把所有玩家的 `hasPlayerOnHead`、`standingOnTeammate` 重設為 `false`，然後對每組同 `isPlayer2`（即同隊）的配對 `(A, B)`：
+
+```
+dx       = A.x - B.x
+dy       = A.y - B.y
+overlapX = PLAYER_LENGTH - |dx|
+overlapY = PLAYER_LENGTH - |dy|
+若 overlapX < 0 或 overlapY < 0 → 沒重疊，跳過
+```
+
+**注意**用 `< 0` 而不是 `<= 0`：玩家在隊友頭頂的穩定狀態下，每 tick 重力推 yVelocity += 1 後又被本輪 clamp 回 0，這時 `|dy|` 剛好等於 `PLAYER_LENGTH`、`overlapY === 0`。若用 `<= 0` 就會放掉這個邊緣，造成上方玩家以為脫離了，下一 tick 的 jump guard 不再認可 `standingOnTeammate`，連跳就斷掉。
+
+選擇主導軸後分兩支處理：
+
+### 12.1 垂直解（疊頭頂）
+
+當 `overlapY < overlapX`：
+
+```ts
+const top = dy < 0 ? A : B; // y 較小的在上
+const bot = dy < 0 ? B : A;
+top.y = bot.y - PLAYER_LENGTH; // 把上方玩家釘在下方玩家頭上
+if (top.yVelocity > 0) {
+  // 正在下落 → 視為「在隊友頭上落地」
+  top.yVelocity = 0;
+  if (top.state === 1 || top.state === 2) {
+    top.state = 0;
+    top.frameNumber = 0;
+  } else if (top.state === 3) {
+    // 撲球落到隊友頭頂 → 倒地（與一般撲球落地一致）
+    top.state = 4;
+    top.frameNumber = 0;
+    top.lyingDownDurationLeft = 3;
+  }
+}
+top.standingOnTeammate = true; // 給下一 tick 的 jump guard
+bot.hasPlayerOnHead = true; // 同上 — 用來鎖住下方玩家的跳躍
+```
+
+語意：上方玩家落到隊友頭頂後立刻**視為在地** — `state` 收斂到 0、`frameNumber` 歸零、yVel 清零。和 §6 配合，他下一 tick 按上即可從 y=180 起跳；下方玩家即使也按上，會被 `hasPlayerOnHead` 擋下。
+
+### 12.2 水平解（互推）
+
+當 `overlapY >= overlapX`（含 `overlapX === 0` 的邊緣相切）：
+
+```ts
+const half = (overlapX / 2) | 0; // 整數除法
+const sign = dx >= 0 ? 1 : -1;
+A.x += half * sign;
+B.x -= half * sign;
+clampPlayerToFieldSide(A); // 保證不被推穿網或推出場外
+clampPlayerToFieldSide(B);
+```
+
+兩位各被推開半個重疊量，再依 `isPlayer2` 對自己半場 clamp。若一方已經貼著場地邊界（例如最右側 x=184），clamp 會吃掉那一側的位移、由另一方獨自承擔分離 — 不會強制把人推穿牆。
+
+### 12.3 為什麼 1v1 沒事
+
+`processPlayerToPlayerCollisions` 只處理「同 `isPlayer2` 的配對」。1v1 兩位玩家的 `isPlayer2` 一個 false 一個 true，沒有同隊配對 → 整個函式是 no-op，兩個 flag 從頭到尾都是 false，跳躍守衛退化回原作的「`y === 244` 才能跳」。所以原作的 golden snapshot（含 Hyper Ball Glitch、左右牆不對稱等 quirks）完全不受 2v2 的存在影響。
+
+## 13. 聲音事件旗標 vs. 多玩家
+
+§11 描述的 `chu / pika / pipikachu` 三個音效都帶 `playerSide: 0 | 1`，對應左右半場（不是 slot index）。在 2v2 下，P1 / P3（同左隊）發出的聲音都會帶 `playerSide: 0`，P2 / P4（同右隊）都是 `playerSide: 1`，audio 層的左右聲道 pan 是基於隊伍位置 — 不會因為 2v2 而需要新增 channel。
 
 下一篇：[03 — 玩家-球碰撞](./03-collision.md)，看看 power hit 是怎麼把球真的加速的。

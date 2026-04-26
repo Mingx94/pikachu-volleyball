@@ -20,7 +20,9 @@
 - **View** — `src/resources/js/view.ts`，負責用 PixiJS v8 渲染 Model 算好的座標。
 - **Controller** — `src/resources/js/pikavolley.ts`，把 keyboard 輸入餵給 Model，並驅動狀態機（intro → menu → round → ...）。
 
-引擎本身完全不依賴 Pixi、DOM 或 audio。它只接受 `PikaUserInput`（兩個玩家的方向鍵與 power hit 按鍵狀態），輸出更新後的 `Player`／`Ball` 物件，以及一個 `isBallTouchingGround` 旗標。Controller 把這個旗標解讀成「該回合結束」並決定計分。
+引擎本身完全不依賴 Pixi、DOM 或 audio。它只接受 `PikaUserInput[]`（每位玩家的方向鍵與 power hit 按鍵狀態），輸出更新後的 `Player[]`／`Ball` 物件，以及一個 `isBallTouchingGround` 旗標。Controller 把這個旗標解讀成「該回合結束」並決定計分。
+
+引擎已從原作的 1v1 寫死，泛化成 N 玩家：`PikaPhysics.players` 長度可以是 2（1v1）或 4（2v2）。1v1 是原作行為的忠實移植；2v2 是本實作對原作的擴充（同隊配對的 AABB 解析），由 `physicsEngine` 在每 tick 的玩家移動之後、球-玩家碰撞之前插入一輪 — 詳見 [02 文件 §12](./02-player.md)。1v1 模式下這輪是 no-op（沒有同隊配對），所以原作 golden snapshot 完全不受影響。
 
 ## 確定性（determinism）
 
@@ -36,14 +38,15 @@
 
 每個 normal-FPS frame，Controller 會：
 
-1. 凍結兩個玩家的 keyboard 輸入到 `PikaUserInput[]`（`keyboard.ts:getInput()`）。
+1. 凍結所有玩家的 keyboard 輸入到 `PikaUserInput[]`（`keyboard.ts:getInput()`），長度等於 `physics.players.length`。
 2. 呼叫 `PikaPhysics.runEngineForNextFrame(userInputArray)`，內部執行 `physicsEngine()`：
    1. **球-世界碰撞** — `processCollisionBetweenBallAndWorldAndSetBallPosition(ball)`：先處理旋轉、左右牆、上邊界、網柱、地面。回傳 `isBallTouchingGround`。
-   2. **每個玩家的移動** — 對 `i = 0, 1`：先算虛擬落地點 `calculateExpectedLandingPointXFor(ball)`（給 AI 用），再呼叫 `processPlayerMovementAndSetPlayerPosition()`（如果是電腦控制，先讓 `letComputerDecideUserInput()` 改寫 `userInput`）。
-   3. **球-玩家碰撞** — 對 `i = 0, 1`：偵測碰撞，若有且這個玩家上一 frame 沒碰到過，呼叫 `processCollisionBetweenBallAndPlayer()` 設定球的新速度。
+   2. **每個玩家的移動** — 對 `i = 0..players.length-1`：先算虛擬落地點 `calculateExpectedLandingPointXFor(ball)`（給 AI 用），再呼叫 `processPlayerMovementAndSetPlayerPosition()`（如果是電腦控制，先讓 `letComputerDecideUserInput()` 改寫 `userInput`，`theOtherPlayer` 由 `findNearestOpponent` 挑出對隊中最靠近球的那位）。
+   3. **隊友碰撞解析（2v2-only no-op in 1v1）** — `processPlayerToPlayerCollisions(players)`：對每組同隊配對做 AABB，垂直主導 → 疊頭頂並設 `hasPlayerOnHead` / `standingOnTeammate`；水平主導 → 對半推開並 clamp 到自己半場。
+   4. **球-玩家碰撞** — 對 `i = 0..players.length-1`：偵測碰撞，若有且這個玩家上一 frame 沒碰到過，呼叫 `processCollisionBetweenBallAndPlayer()` 設定球的新速度。
 3. 若 `isBallTouchingGround === true`，Controller 加分、判斷是否結束遊戲、進入慢動作。
 4. 把 `PhysicsTickResult.sounds`（一個 `SoundEvent[]`，由 engine 在 tick 內按發生順序 push）依序丟給 audio 層播放。Engine 本身不持有任何播放狀態，所以也不需要重設旗標。
-5. View 從 `Player`／`Ball` 讀取座標渲染。
+5. View 從 `Player[]`／`Ball` 讀取座標渲染。
 
 ## 載入用的常數
 

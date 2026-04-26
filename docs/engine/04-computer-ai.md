@@ -32,6 +32,8 @@ userInput.powerHit = 0;
 // ...決策邏輯...
 ```
 
+> **2v2 注意**：`theOtherPlayer` 由 caller (`physics.ts:findNearestOpponent`) 算出，規則是「對隊（`isPlayer2` 與自己相反）中 `|p.x - ball.x|` 最小的那位」。1v1 對隊只有一位，自然退化成原作的固定對手，所以本檔接下來的所有公式（含 `decideWhetherInputPowerHit` 用來避開對手的 `Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH` 那條）在 1v1 完全等價於原作；2v2 則讓每位 AI 自然針對「最可能擊球的對手」做 power-hit 規避。AI 函式本體完全沒改，只是 caller 餵的 `theOtherPlayer` 改了選法。同隊 AI 之間沒有額外協調 — 球權自然由「先到位的人先擊」決定。
+
 ## 2. 勇氣值 `computerBoldness`
 
 這是 AI 的「難度旋鈕」，每回合開始時用 `rand() % 5` 隨機取 `[0, 4]` 的整數。值越大，電腦越大膽。它影響三個地方：
