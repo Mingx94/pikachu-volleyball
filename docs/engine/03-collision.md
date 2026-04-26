@@ -114,7 +114,7 @@ if (playerState === 2) {
   // y 方向由玩家輸入決定
   ball.yVelocity = Math.abs(ball.yVelocity) * userInput.yDirection * 2;
   ball.punchEffectRadius = BALL_RADIUS;
-  ball.sound.powerHit = true;
+  sounds.push({ kind: 'powerHit', x: ball.x });
   ball.isPowerHit = true;
 } else {
   ball.isPowerHit = false;

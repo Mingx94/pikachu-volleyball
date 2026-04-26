@@ -113,7 +113,7 @@ if (
   player.yVelocity = -16;
   player.state = 1;
   player.frameNumber = 0;
-  player.sound.chu = true;
+  sounds.push({ kind: 'chu', playerSide });
 }
 ```
 
@@ -155,14 +155,14 @@ if (player.state === 1) {
   player.state = 2;
   player.delayBeforeNextFrame = 5;
   player.frameNumber = 0;
-  player.sound.pika = true;
+  sounds.push({ kind: 'pika', playerSide });
 } else if (player.state === 0 && userInput.xDirection !== 0) {
   // 在地上 + 有方向 → 撲球
   player.state = 3;
   player.frameNumber = 0;
   player.divingDirection = userInput.xDirection; // 鎖定方向
   player.yVelocity = -5; // 小幅向上
-  player.sound.chu = true;
+  sounds.push({ kind: 'chu', playerSide });
 }
 ```
 
@@ -217,7 +217,7 @@ if (player.gameEnded === true) {
   if (player.state === 0) {
     if (player.isWinner) {
       player.state = 5;
-      player.sound.pipikachu = true; // 「ピピカチュー」勝利音效
+      sounds.push({ kind: 'pipikachu', playerSide }); // 「ピピカチュー」勝利音效
     } else {
       player.state = 6;
     }

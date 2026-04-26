@@ -136,7 +136,7 @@ ball.rotation = (ball.fineRotation / 10) | 0; // 0..5
 const futureBallY = ball.y + ball.yVelocity;
 if (futureBallY > BALL_TOUCHING_GROUND_Y_COORD) {
   // y > 252
-  ball.sound.ballTouchesGround = true;
+  sounds.push({ kind: 'ballTouchesGround', x: ball.x });
   ball.yVelocity = -ball.yVelocity; // 反彈（雖然之後不會再 tick 球，但給視覺一個收尾）
   ball.punchEffectX = ball.x;
   ball.y = BALL_TOUCHING_GROUND_Y_COORD; // 釘在地面

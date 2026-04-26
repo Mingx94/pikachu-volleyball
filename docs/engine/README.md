@@ -9,15 +9,15 @@
 | [01 — 世界與球](./01-world-and-ball.md) | 座標系統、世界邊界、網柱碰撞、Hyper Ball Glitch                       | `physics.ts` 中 `processCollisionBetweenBallAndWorldAndSetBallPosition`、`Ball` 類別                            |
 | [02 — 玩家狀態機](./02-player.md)       | 7 種 state、跳躍、撲球、Power Hit、邊界、frame counter                | `physics.ts` 中 `processPlayerMovementAndSetPlayerPosition`、`Player` 類別                                      |
 | [03 — 玩家-球碰撞](./03-collision.md)   | 矩形碰撞偵測、`xVelocity` 計算、Power Hit 速度公式、碰撞鎖            | `physics.ts` 中 `isCollisionBetweenBallAndPlayerHappened`、`processCollisionBetweenBallAndPlayer`               |
-| [04 — 電腦 AI](./04-computer-ai.md)     | `letComputerDecideUserInput`、`computerBoldness`、虛擬落地點、AI 漏洞 | `physics.ts` 中 `letComputerDecideUserInput`、`decideWhetherInputPowerHit`、`expectedLandingPointXWhenPowerHit` |
+| [04 — 電腦 AI](./04-computer-ai.md)     | `letComputerDecideUserInput`、`computerBoldness`、虛擬落地點、AI 漏洞 | `ai.ts` 中 `letComputerDecideUserInput`、`decideWhetherInputPowerHit`、`expectedLandingPointXWhenPowerHit`      |
 | [05 — 雲與波浪](./05-cloud-and-wave.md) | 背景動畫引擎（裝飾用，不影響遊戲玩法）                                | `cloud_and_wave.ts`                                                                                             |
 
 ## 引擎在 MVC 中的位置
 
 整個 codebase 採用 MVC：
 
-- **Model（引擎）** — `src/resources/js/physics.ts` 與 `src/resources/js/cloud_and_wave.ts`。本資料夾文件只描述這層。
-- **View** — `src/resources/js/view.ts`，負責用 PixiJS v6 渲染 Model 算好的座標。
+- **Model（引擎）** — `src/resources/js/physics.ts`、`src/resources/js/ai.ts`、`src/resources/js/cloud_and_wave.ts`。本資料夾文件只描述這層。
+- **View** — `src/resources/js/view.ts`，負責用 PixiJS v8 渲染 Model 算好的座標。
 - **Controller** — `src/resources/js/pikavolley.ts`，把 keyboard 輸入餵給 Model，並驅動狀態機（intro → menu → round → ...）。
 
 引擎本身完全不依賴 Pixi、DOM 或 audio。它只接受 `PikaUserInput`（兩個玩家的方向鍵與 power hit 按鍵狀態），輸出更新後的 `Player`／`Ball` 物件，以及一個 `isBallTouchingGround` 旗標。Controller 把這個旗標解讀成「該回合結束」並決定計分。
@@ -42,7 +42,7 @@
    2. **每個玩家的移動** — 對 `i = 0, 1`：先算虛擬落地點 `calculateExpectedLandingPointXFor(ball)`（給 AI 用），再呼叫 `processPlayerMovementAndSetPlayerPosition()`（如果是電腦控制，先讓 `letComputerDecideUserInput()` 改寫 `userInput`）。
    3. **球-玩家碰撞** — 對 `i = 0, 1`：偵測碰撞，若有且這個玩家上一 frame 沒碰到過，呼叫 `processCollisionBetweenBallAndPlayer()` 設定球的新速度。
 3. 若 `isBallTouchingGround === true`，Controller 加分、判斷是否結束遊戲、進入慢動作。
-4. 把 `Player.sound.*` 與 `Ball.sound.*` 旗標讀出來播放音效（並重設旗標）。
+4. 把 `PhysicsTickResult.sounds`（一個 `SoundEvent[]`，由 engine 在 tick 內按發生順序 push）依序丟給 audio 層播放。Engine 本身不持有任何播放狀態，所以也不需要重設旗標。
 5. View 從 `Player`／`Ball` 讀取座標渲染。
 
 ## 載入用的常數

@@ -1,7 +1,9 @@
 # 04 — 電腦 AI
 
-> 對應原始碼：`src/resources/js/physics.ts`
+> 對應原始碼：`src/resources/js/ai.ts`
 > 涉及函式：`letComputerDecideUserInput`（`FUN_00402360`）、`decideWhetherInputPowerHit`（`FUN_00402630`）、`expectedLandingPointXWhenPowerHit`（`FUN_00402870`）
+
+> AI 過去住在 `physics.ts` 內，但邏輯上是 controller-layer 的決策（決定一個 input 餵進 physics engine），所以拆成獨立檔案。呼叫點仍在 `physics.ts:processPlayerMovementAndSetPlayerPosition` 開頭，相對 `calculateExpectedLandingPointXFor` 的時序與原作完全一致。
 
 電腦 AI 的設計是「**讓 AI 假裝它是個人類玩家**」 — 它不直接修改 `Player.x` / `Ball.xVelocity`，而是改寫 `userInput.xDirection` / `yDirection` / `powerHit` 三個值，然後讓 `processPlayerMovementAndSetPlayerPosition` 像處理人類輸入一樣處理它。
 
