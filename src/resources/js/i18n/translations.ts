@@ -30,6 +30,9 @@ export const translations: Record<Locale, TranslationTable> = {
     'menu.game': 'Game',
     'menu.pause': 'Pause',
     'menu.restart': 'Restart',
+    'menu.save_replay': 'Save Replay',
+    'menu.watch_last_replay': 'Watch Last Replay',
+    'menu.watch_replay_from_file': 'Watch Replay (file…)',
     'menu.options': 'Options',
 
     // Options submenus
@@ -109,6 +112,10 @@ export const translations: Record<Locale, TranslationTable> = {
       'The winning score can not be set to the <span id="winning-score-in-notice-box-1"></span> pts, since the score is already reached.',
     'notice.no_point_in_practice_html':
       'There\'s no point adjusting the winning score in practice mode.<br>You can turn off practice mode at <span class="no_wrap">"Options → Practice mode → off"</span>.',
+    'notice.replay_saved': 'Replay saved.',
+    'notice.replay_load_failed': 'Failed to load replay.',
+    'notice.replay_no_recording': 'No match in progress to save.',
+    'notice.replay_no_last': 'No saved replay yet — finish a match and click Save Replay first.',
     'notice.ok': 'OK',
 
     // Loading
@@ -152,6 +159,9 @@ export const translations: Record<Locale, TranslationTable> = {
     'menu.game': '게임',
     'menu.pause': '일시정지',
     'menu.restart': '다시시작',
+    'menu.save_replay': '리플레이 저장',
+    'menu.watch_last_replay': '최근 리플레이 보기',
+    'menu.watch_replay_from_file': '리플레이 보기 (파일…)',
     'menu.options': '설정',
 
     'options.graphic_label': '그래픽' + ARROW,
@@ -227,6 +237,11 @@ export const translations: Record<Locale, TranslationTable> = {
       '승리점수를 <span id="winning-score-in-notice-box-1"></span>점으로 바꿀 수 없습니다. 이미 이 점수가 됐거나 넘어버렸습니다.',
     'notice.no_point_in_practice_html':
       '연습모드에서 승리점수를 바꾸는 건 의미가 없습니다.<br>연습모드를 끄려면 <span class="no_wrap">"설정 → 연습모드 → 끄기"</span>를 눌러주세요.',
+    'notice.replay_saved': '리플레이를 저장했습니다.',
+    'notice.replay_load_failed': '리플레이 로드에 실패했습니다.',
+    'notice.replay_no_recording': '저장할 진행 중인 경기가 없습니다.',
+    'notice.replay_no_last':
+      '저장된 리플레이가 없습니다 — 경기를 마치고 "리플레이 저장"을 먼저 눌러주세요.',
     'notice.ok': '알겠어요',
 
     'loading.message': '게임 스프라이트/사운드 로드 중...',
@@ -266,6 +281,9 @@ export const translations: Record<Locale, TranslationTable> = {
     'menu.game': '遊戲',
     'menu.pause': '暫停',
     'menu.restart': '重來',
+    'menu.save_replay': '儲存重播',
+    'menu.watch_last_replay': '觀看最近重播',
+    'menu.watch_replay_from_file': '觀看重播 (檔案…)',
     'menu.options': '選項',
 
     'options.graphic_label': 'Graphic' + ARROW,
@@ -339,6 +357,10 @@ export const translations: Record<Locale, TranslationTable> = {
       '遊戲分數無法設定成 <span id="winning-score-in-notice-box-1"></span> 分，因為此分數已於先前達到',
     'notice.no_point_in_practice_html':
       '在練習模式中並沒有分數設定。<br>你可以在 <span class="no_wrap">"選項 → 練習模式 → 關"</span> 關閉練習模式',
+    'notice.replay_saved': '重播已儲存',
+    'notice.replay_load_failed': '重播載入失敗',
+    'notice.replay_no_recording': '目前沒有進行中的對局可儲存',
+    'notice.replay_no_last': '尚無已儲存重播 — 請先完成一局並按「儲存重播」',
     'notice.ok': 'OK',
 
     'loading.message': '載入遊戲資源中...',

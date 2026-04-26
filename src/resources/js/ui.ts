@@ -4,6 +4,8 @@
 import type { Ticker } from 'pixi.js';
 import { localStorageWrapper } from './utils/local_storage_wrapper.js';
 import type { PikachuVolleyball } from './pikavolley.js';
+import { deserializeReplay, serializeReplay } from './replay.js';
+import { t } from './i18n/index.js';
 
 export interface Options {
   graphic?: string | null;
@@ -57,6 +59,18 @@ function el(id: string): HTMLElement {
 /** Get a required button element by id; throws if missing. */
 function btnEl(id: string): HTMLButtonElement {
   return el(id) as HTMLButtonElement;
+}
+
+function triggerDownload(json: string, filename: string): void {
+  const blob = new Blob([json], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /**
@@ -219,6 +233,89 @@ function setUpBtns(
     }
     pikaVolley.restart();
   });
+
+  // ----- Replay UI -----
+  const saveReplayBtn = el('save-replay-btn');
+  const watchLastReplayBtn = el('watch-last-replay-btn');
+  const watchReplayFromFileBtn = el('watch-replay-from-file-btn');
+  const replayFileInput = el('replay-file-input') as HTMLInputElement;
+  const noticeBoxReplay = el('notice-box-replay');
+  const replayNoticeMsg = el('replay-notice-msg');
+  const noticeOKBtnReplay = el('notice-ok-btn-replay');
+
+  const showReplayNotice = (key: string): void => {
+    replayNoticeMsg.textContent = t(key);
+    noticeBoxReplay.classList.remove('hidden');
+    gameDropdownBtn.disabled = true;
+    optionsDropdownBtn.disabled = true;
+    aboutBtn.disabled = true;
+    pauseResumeManager.pause(pikaVolley, PauseResumePrecedence.messageBox);
+  };
+
+  noticeOKBtnReplay.addEventListener('click', () => {
+    if (!noticeBoxReplay.classList.contains('hidden')) {
+      noticeBoxReplay.classList.add('hidden');
+      gameDropdownBtn.disabled = false;
+      optionsDropdownBtn.disabled = false;
+      aboutBtn.disabled = false;
+      pauseResumeManager.resume(pikaVolley, PauseResumePrecedence.messageBox);
+    }
+  });
+
+  saveReplayBtn.addEventListener('click', () => {
+    const replay = pikaVolley.peekRecording();
+    if (replay === null) {
+      showReplayNotice('notice.replay_no_recording');
+      return;
+    }
+    const json = serializeReplay(replay);
+    localStorageWrapper.set('pv-last-replay', json);
+    const ts = new Date().toISOString().replaceAll(/[-:.]/g, '').slice(0, 15);
+    triggerDownload(json, `pikavolley-${ts}.replay.json`);
+    showReplayNotice('notice.replay_saved');
+  });
+
+  const startReplayFromJson = (json: string): void => {
+    try {
+      const replay = deserializeReplay(json);
+      // Drop a paused state (e.g. user paused before clicking Watch)
+      if (pauseBtn.classList.contains('selected')) {
+        pauseBtn.classList.remove('selected');
+        pauseResumeManager.resume(pikaVolley, PauseResumePrecedence.pauseBtn);
+      }
+      pikaVolley.startReplay(replay);
+    } catch {
+      showReplayNotice('notice.replay_load_failed');
+    }
+  };
+
+  watchLastReplayBtn.addEventListener('click', () => {
+    const json = localStorageWrapper.get('pv-last-replay');
+    if (json === null) {
+      showReplayNotice('notice.replay_no_last');
+      return;
+    }
+    startReplayFromJson(json);
+  });
+
+  watchReplayFromFileBtn.addEventListener('click', () => {
+    replayFileInput.click();
+  });
+
+  replayFileInput.addEventListener('change', () => {
+    const file = replayFileInput.files?.[0];
+    replayFileInput.value = ''; // allow re-selecting the same file later
+    if (!file) return;
+    const reader = new FileReader();
+    reader.addEventListener('load', () => {
+      if (typeof reader.result === 'string') startReplayFromJson(reader.result);
+    });
+    reader.addEventListener('error', () => {
+      showReplayNotice('notice.replay_load_failed');
+    });
+    reader.readAsText(file);
+  });
+  // ----- /Replay UI -----
 
   const graphicSharpBtn = el('graphic-sharp-btn');
   const graphicSoftBtn = el('graphic-soft-btn');

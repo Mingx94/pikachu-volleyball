@@ -62,6 +62,26 @@
               <button type="button" id="restart-btn" class="btn" data-i18n="menu.restart">
                 Restart
               </button>
+              <button type="button" id="save-replay-btn" class="btn" data-i18n="menu.save_replay">
+                Save Replay
+              </button>
+              <button
+                type="button"
+                id="watch-last-replay-btn"
+                class="btn"
+                data-i18n="menu.watch_last_replay"
+              >
+                Watch Last Replay
+              </button>
+              <button
+                type="button"
+                id="watch-replay-from-file-btn"
+                class="btn"
+                data-i18n="menu.watch_replay_from_file"
+              >
+                Watch Replay (file…)
+              </button>
+              <input type="file" id="replay-file-input" accept=".json,application/json" hidden />
             </div>
           </div>
           <div class="relative-container">
@@ -359,6 +379,12 @@
             There's no point adjusting the winning score in practice mode.
           </p>
           <button type="button" id="notice-ok-btn-2" class="btn-in-box" data-i18n="notice.ok">
+            OK
+          </button>
+        </div>
+        <div class="fade-in-box notice hidden" id="notice-box-replay">
+          <p id="replay-notice-msg"></p>
+          <button type="button" id="notice-ok-btn-replay" class="btn-in-box" data-i18n="notice.ok">
             OK
           </button>
         </div>

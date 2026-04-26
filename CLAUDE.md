@@ -9,10 +9,9 @@
 - `npm run build` — 把 production bundle 輸出到 `dist/`（Vite + `vite-plugin-pwa` GenerateSW）。
 - `npm run preview` — `npm run build` 之後本機端預覽打包結果。
 - `npm run typecheck` — 對 `tsconfig.json`（app）與 `tsconfig.node.json`（Vite config）兩份各跑一次 `tsc --noEmit`。Vite/esbuild 在 build 時**不會**做型別檢查，這個指令是唯一的安全網 — commit 前請執行。
+- `npm test` / `npm run test:watch` — Vitest（搭 `vitest.config.ts`，node environment）。測試檔以 `*.test.ts` 命名，跟 source 同層放。針對 `physics.ts` 的確定性引擎做 golden snapshot — 透過 `setCustomRng()` 餵 seedable PRNG（mulberry32），驗證載重 quirk（Hyper Ball Glitch、左右牆不對稱、ball-player collision velocity）。修改 `physics.ts` 後請務必跑這個。
 - `npm run lint` — `oxlint`（Rust 製，取代 ESLint）。
-- `npm run format` / `npm run format:check` — `oxfmt`（Rust 製，取代 Prettier）。
-
-沒有測試框架。先前的 `npm test` echo script 已被移除；不要再加回 placeholder。
+- `npm run format` / `npm run format:check` — `oxfmt`（Rust 製，取代 Prettier）。涵蓋 `src/`、`vite.config.ts`、`vitest.config.ts`。
 
 ## 架構
 
@@ -23,8 +22,9 @@ MVC 拆分，全部位於 `src/resources/js/`：
 - **Model — `physics.ts`**：球與兩隻皮卡丘的確定性物理引擎，_並包含_ 合成 keyboard 輸入的電腦 AI。直接從逆向工程出來的機器碼移植。使用整數風格的位元運算（`| 0`）以及 `rand.ts` 裡的 seeded PRNG — 在沒有充分理解的情況下，**不要**「現代化」成浮點數或 `Math.random()`，否則會與原作行為失同步。場地是 432×304；檔案開頭那一組常數是 load-bearing 的。
 - **Model — `cloud_and_wave.ts`**：同樣是逆向工程出來的，驅動背景的雲與波浪動畫，由 `view.ts` 渲染。
 - **View — `view.ts`**：PixiJS 渲染。`IntroView`、`MenuView`、`GameView`、`FadeInOut` 在 `pikavolley.ts` 裡被掛到 root stage 之下。內部用了 `getSheetTextures` / `getTexture` 兩個小 helper 在邊界處 throw，避免在整個檔案散布 `!` 非空斷言。
-- **Controller — `pikavolley.ts`**：`PikachuVolleyball` class 擁有 physics、view、audio 與兩個 `PikaKeyboard`。以 `normalFPS = 25` 執行；回合結束後的慢動作會降到 `slowMotionFPS = 5` 持續 `SLOW_MOTION_FRAMES_NUM` 個 frame。`gameLoop()` 是由 PIXI `Ticker` 驅動的狀態機 tick。`state: GameState` 是個 function reference（`= () => void`），會在 method 之間互相重新指派（`intro` / `menu` / `round` 等）— 透過 property 呼叫 `this.state()` 時 `this` 會正確 rebind。
-- **`main.ts`**：bootstrap pixi（合併的 `pixi.js` import + 從 `@pixi/sound` 拿 `Sound` 型別並 side-effect import 註冊 sound 的 Assets parser），`new Application()` 之後 `await app.init({ preference: 'webgl', ... })`，用 `Assets.load([SPRITE_SHEET, ...SOUNDS], onProgress)` 一次載完 spritesheet 與聲音，接好 UI，最後 `app.ticker.add(() => pikaVolley.gameLoop())` — `Application` 的 TickerPlugin 會自動 render，`gameLoop` 不要再呼叫 `renderer.render()`。在最頂端 import `./i18n/index.js`，這樣 i18n 模組對韓文 texture 路徑的覆寫會在 `Assets.load(SPRITE_SHEET)` 之前先寫入 `ASSETS_PATH.TEXTURES`（spritesheet frame key 在 sprite 建立時才會被 view.ts 查找）。
+- **Controller — `pikavolley.ts`**：`PikachuVolleyball` class 擁有 physics、view、audio 與兩個 `PikaKeyboard`。以 `normalFPS = 25` 執行；回合結束後的慢動作會降到 `slowMotionFPS = 5` 持續 `SLOW_MOTION_FRAMES_NUM` 個 frame。`gameLoop()` 是由 PIXI `Ticker` 驅動的狀態機 tick。`state: GameState` 是個 function reference（`= () => void`），會在 method 之間互相重新指派（`intro` / `menu` / `round` 等）— 透過 property 呼叫 `this.state()` 時 `this` 會正確 rebind。`startRecording(seed)` / `stopRecording()` 是 opt-in 的 replay 錄製鉤子（`round()` 會在每個 physics tick 之前 push input snapshot），合約：必須在進入 `round` 前呼叫，否則 RNG 已經被消耗，replay 會對不上。對稱的 `startReplay(replay)` 會 setCustomRng + 重建 `PikaPhysics` + 把 state 直接設成 `round`，刻意跳過 `startOfNewGame` 的視覺 intro 來避免 `initializeForNewRound` 二次消耗 seed rng。多回合可 bit-perfect 重現：recording 時 `beforeStartOfNextRound` 會落 `pendingReInitMarker`，下次 `round()` push 時 flush 進 `recordingReInits` 帶進 `Replay.roundReInits`；playback 時 controller 自然會走 `beforeStartOfNextRound` 消耗那 2 個 rand，不需要額外手動補。`isRecording` / `isReplaying` getter 給 UI 用。
+- **`main.ts`**：bootstrap pixi（合併的 `pixi.js` import + 從 `@pixi/sound` 拿 `Sound` 型別並 side-effect import 註冊 sound 的 Assets parser），`new Application()` 之後 `await app.init({ preference: 'webgl', ... })`，用 `Assets.load([SPRITE_SHEET, ...SOUNDS], onProgress)` 一次載完 spritesheet 與聲音，接好 UI。Sim 與 render 解耦：`app.ticker` 跑在原生 refresh rate 自動 render；`pikaVolley.gameLoop()` 用 fixed-step accumulator 在 ticker callback 內每湊到 `1000/normalFPS = 40ms` 就 tick 一次（max 4 step / callback 防 spiral-of-death，paused 時清零 accumulator）— 這樣 60/144/166 Hz 螢幕都跑同樣的 25 Hz simulation。在最頂端 import `./i18n/index.js`，這樣 i18n 模組對韓文 texture 路徑的覆寫會在 `Assets.load(SPRITE_SHEET)` 之前先寫入 `ASSETS_PATH.TEXTURES`（spritesheet frame key 在 sprite 建立時才會被 view.ts 查找）。
+- **`replay.ts`**：把確定性引擎的「seed + 每 frame input pair」打包成可序列化的 `Replay` 物件，並提供 `runReplay()` 從頭重跑、`serializeReplay` / `deserializeReplay` 做 JSON round-trip。內含 `mulberry32` 種子 PRNG（測試與 replay 共用）。多回合對局透過 optional `roundReInits: { atFrame, isPlayer2Serve }[]` 標記每個 inter-round 的 `Player.initializeForNewRound()` 點，`runReplay` 會在指定 frame 之前先補上那 2 個 reInit rand 消耗，避免從第 2 回合開始發散。只覆蓋 physics 層的 tick — controller 層的計分 / 慢動作 / 狀態機不在這個 module 的 scope 內。
 - **`keyboard.ts`**、**`audio.ts`**、**`ui.ts`**、**`assets_path.ts`**：支援模組。`utils/` 裡放純 DOM 的 helper（dark mode、是否被嵌入別的網站、localStorage wrapper）。
 - **`i18n/`**：執行時的 locale 解析 + DOM 翻譯。`i18n/index.ts` 解析 locale（URL `?lang=` → localStorage `pv-locale` → `navigator.language` → `en`），在 module load 時同步套用韓文 texture 覆寫，DOM ready 之後巡訪 `[data-i18n]` / `[data-i18n-html]` / `[data-i18n-attr]`，並把 `[data-locale]` 按鈕接到 `setLocale()`（會持久化並用 `?lang=` 重新載入）。`i18n/translations.ts` 持有 `Record<Locale, Record<string, string>>` 的字典（約 90 個 key）。
 
@@ -40,7 +40,7 @@ MVC 拆分，全部位於 `src/resources/js/`：
 - 資源用 `Assets.load(urls, onProgress)`，一次拿到 spritesheet 與 sounds（`@pixi/sound` 的 side-effect import 會自動把 sound parser 註冊到 Assets）。沒有 `Loader` 也沒有 `*.registerPlugin`。
 - 全域預設 scale mode 改在 `TextureStyle.defaultOptions.scaleMode = 'nearest'` 設定，必須在 `Assets.load` 之前（spritesheet texture 從 default 繼承）。`resolution` / `roundPixels` 都改傳到 `app.init` 的 options。
 - Renderer 強制走 WebGL（`preference: 'webgl'`）。v8 已移除 Canvas-only renderer，所以沒有 `forceCanvas` 可用；如果之後再有玩家回報 WebGL 渲染問題，請評估特定 driver workaround、或加 `preference: ['webgl', 'webgpu']` fallback，而不是嘗試走 canvas。
-- `app.ticker` 由 `Application` 內建的 TickerPlugin 每 tick 自動 render stage，所以 ticker callback 內**不要**再呼叫 `renderer.render(stage)`，否則會 double render。`gameLoop()` 是 frame-rate-driven 的固定步狀態機，沒有讀 deltaTime，所以 v8 把 `Ticker` instance 而非 `delta` 數字傳給 callback 對本專案沒影響。
+- `app.ticker` 由 `Application` 內建的 TickerPlugin 每 tick 自動 render stage，所以 ticker callback 內**不要**再呼叫 `renderer.render(stage)`，否則會 double render。`gameLoop()` 是 frame-rate-driven 的固定步狀態機，由 `main.ts` 的 accumulator 用 `ticker.deltaMS` 算累積時間 / 40 ms 來控制呼叫頻率（不讀 `delta`）。
 
 ### TypeScript 設定
 

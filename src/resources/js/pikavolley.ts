@@ -4,6 +4,15 @@
 import type { Container, Spritesheet } from 'pixi.js';
 import type { Sound } from '@pixi/sound';
 import { GROUND_HALF_WIDTH, PikaPhysics, type SoundEvent } from './physics.js';
+import { setCustomRng } from './rand.js';
+import {
+  buildReplay,
+  mulberry32,
+  type Replay,
+  type RoundReInit,
+  type SerializedInput,
+  snapshotInputs,
+} from './replay.js';
 import { MenuView, GameView, FadeInOut, IntroView } from './view.js';
 import { PikaKeyboard } from './keyboard.js';
 import { PikaAudio } from './audio.js';
@@ -91,7 +100,36 @@ export class PikachuVolleyball {
   paused = false;
   isStereoSound = true;
 
+  /**
+   * If true, every match auto-starts recording on entering {@link startOfNewGame}
+   * with a fresh random seed. Disabled while a Replay is being played back.
+   */
+  autoStartRecording = true;
+
   private _isPracticeMode = false;
+
+  /**
+   * Replay recording buffer. When non-null, every physics tick driven by
+   * {@link round} pushes the frame's input snapshot here. `null` means
+   * recording is off. See {@link startRecording} / {@link stopRecording}.
+   */
+  private recordingSeed: number | null = null;
+  private recordingFrames: Array<readonly [SerializedInput, SerializedInput]> | null = null;
+  private recordingReInits: RoundReInit[] = [];
+  /**
+   * One-shot signal from {@link beforeStartOfNextRound}: the next recorded
+   * frame should be marked as a round-reInit boundary so multi-round replays
+   * can reproduce the 2 rand calls consumed by `Player.initializeForNewRound`.
+   */
+  private pendingReInitMarker: { isPlayer2Serve: boolean } | null = null;
+
+  /**
+   * Replay playback buffer. When non-null, {@link round} overrides the live
+   * keyboardArray with the scripted input for the current frame. `null` means
+   * not replaying. See {@link startReplay}.
+   */
+  private replayFrames: ReadonlyArray<readonly [SerializedInput, SerializedInput]> | null = null;
+  private replayCursor = 0;
 
   /** The game state which is being rendered now */
   state: GameState;
@@ -283,6 +321,11 @@ export class PikachuVolleyball {
   /** Start of new game: Initialize ball and players and print game start message */
   startOfNewGame(): void {
     if (this.frameCounter === 0) {
+      // Auto-record this match. Must run BEFORE the initializeForNewRound
+      // calls below so the seeded rng is what assigns computerBoldness.
+      if (this.autoStartRecording && !this.isRecording) {
+        this.startRecording(Math.floor(Math.random() * 0x7fff_ffff));
+      }
       this.view.game.visible = true;
       this.gameEnded = false;
       this.roundEnded = false;
@@ -319,6 +362,20 @@ export class PikachuVolleyball {
 
   /** Round: the players play volleyball in this game state */
   round(): void {
+    // Replay playback: overwrite live keyboard input with the scripted frame.
+    // Must run BEFORE pressedPowerHit is read so the replay's powerHit is
+    // honored by the both-computer skip-to-intro branch below.
+    if (this.replayFrames !== null) {
+      const frame = this.replayFrames[this.replayCursor];
+      if (frame === undefined) {
+        this.replayFrames = null; // exhausted — live keyboard takes over
+      } else {
+        Object.assign(this.keyboardArray[0], frame[0]);
+        Object.assign(this.keyboardArray[1], frame[1]);
+        this.replayCursor++;
+      }
+    }
+
     const pressedPowerHit =
       this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1;
 
@@ -331,6 +388,17 @@ export class PikachuVolleyball {
       this.view.game.visible = false;
       this.state = this.intro;
       return;
+    }
+
+    if (this.recordingFrames !== null) {
+      if (this.pendingReInitMarker !== null) {
+        this.recordingReInits.push({
+          atFrame: this.recordingFrames.length,
+          isPlayer2Serve: this.pendingReInitMarker.isPlayer2Serve,
+        });
+        this.pendingReInitMarker = null;
+      }
+      this.recordingFrames.push(snapshotInputs(this.keyboardArray));
     }
 
     const { isBallTouchingGround, sounds } = this.physics.runEngineForNextFrame(this.keyboardArray);
@@ -415,6 +483,11 @@ export class PikachuVolleyball {
       this.physics.player1.initializeForNewRound();
       this.physics.player2.initializeForNewRound();
       this.physics.ball.initializeForNewRound(this.isPlayer2Serve);
+      // Mark this reInit so the next recorded frame in `round()` pins it as a
+      // multi-round boundary in the Replay artifact.
+      if (this.recordingFrames !== null) {
+        this.pendingReInitMarker = { isPlayer2Serve: this.isPlayer2Serve };
+      }
       this.view.game.drawPlayersAndBall(this.physics);
     }
 
@@ -466,9 +539,125 @@ export class PikachuVolleyball {
     this.noInputFrameCounter = 0;
     this.slowMotionFramesLeft = 0;
     this.slowMotionNumOfSkippedFrames = 0;
+    this.recordingSeed = null;
+    this.recordingFrames = null;
+    this.recordingReInits = [];
+    this.pendingReInitMarker = null;
+    this.replayFrames = null;
+    this.replayCursor = 0;
     this.view.menu.visible = false;
     this.view.game.visible = false;
     this.state = this.intro;
+  }
+
+  /**
+   * Begin recording a Replay. Must be called BEFORE the first physics tick of
+   * the match you want to capture (e.g. while the controller is still in
+   * `intro` or `menu`) — `setCustomRng` is reset here, so any RNG-dependent
+   * state already produced by an in-flight match (computerBoldness, etc.)
+   * will not be reproducible from `seed`.
+   */
+  startRecording(seed: number): void {
+    setCustomRng(mulberry32(seed));
+    this.recordingSeed = seed;
+    this.recordingFrames = [];
+    this.recordingReInits = [];
+    this.pendingReInitMarker = null;
+  }
+
+  /**
+   * Begin playing back a Replay through the live controller. Constructs a
+   * fresh PikaPhysics with the replay's seed (matching what {@link runReplay}
+   * does) and jumps directly to {@link round}, skipping {@link startOfNewGame}'s
+   * fade-in / "GAME START" intro — entering startOfNewGame would call
+   * {@link physics.Player.initializeForNewRound} a second time, double-consuming
+   * the seeded rand and breaking computerBoldness alignment with runReplay.
+   *
+   * Limitation: the captured Replay format only seeds before the first round,
+   * so multi-round matches diverge starting at round 2 (each new round's
+   * `beforeStartOfNextRound` re-rolls computerBoldness from rand, which the
+   * replay format does not encode). Single-round playback is bit-perfect.
+   */
+  startReplay(replay: Replay): void {
+    setCustomRng(mulberry32(replay.seed));
+    this.physics = new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer);
+    this.scores = [0, 0];
+    this.gameEnded = false;
+    this.roundEnded = false;
+    this.isPlayer2Serve = false;
+    this.frameCounter = 0;
+    this.noInputFrameCounter = 0;
+    this.slowMotionFramesLeft = 0;
+    this.slowMotionNumOfSkippedFrames = 0;
+    this.replayFrames = replay.frames;
+    this.replayCursor = 0;
+    // Don't record the replay we're playing back — would cascade into a
+    // recording-of-a-recording that's not useful.
+    this.autoStartRecording = false;
+    this.recordingSeed = null;
+    this.recordingFrames = null;
+    this.recordingReInits = [];
+    this.pendingReInitMarker = null;
+    this.view.fadeInOut.setBlackAlphaTo(0);
+    this.view.intro.visible = false;
+    this.view.menu.visible = false;
+    this.view.game.visible = true;
+    this.view.game.drawScoresToScoreBoards(this.scores);
+    this.view.game.drawPlayersAndBall(this.physics);
+    this.audio.sounds.bgm.play();
+    this.state = this.round;
+  }
+
+  get isReplaying(): boolean {
+    return this.replayFrames !== null;
+  }
+
+  get isRecording(): boolean {
+    return this.recordingFrames !== null;
+  }
+
+  /**
+   * Snapshot the in-progress recording into a Replay without stopping it.
+   * Returns `null` if recording is not active. Useful for "Save Replay"
+   * mid-match — the recording continues building from the same buffer.
+   */
+  peekRecording(): Replay | null {
+    if (this.recordingFrames === null || this.recordingSeed === null) return null;
+    return buildReplay({
+      seed: this.recordingSeed,
+      isPlayer1Computer: this.physics.player1.isComputer,
+      isPlayer2Computer: this.physics.player2.isComputer,
+      frames: [...this.recordingFrames],
+      ...(this.recordingReInits.length > 0 ? { roundReInits: [...this.recordingReInits] } : {}),
+      finalScores: [this.scores[0], this.scores[1]],
+    });
+  }
+
+  /**
+   * Finalize and return the captured Replay, or `null` if recording was not
+   * active. Recording is cleared either way.
+   */
+  stopRecording(): Replay | null {
+    if (this.recordingFrames === null || this.recordingSeed === null) {
+      this.recordingFrames = null;
+      this.recordingSeed = null;
+      this.recordingReInits = [];
+      this.pendingReInitMarker = null;
+      return null;
+    }
+    const replay = buildReplay({
+      seed: this.recordingSeed,
+      isPlayer1Computer: this.physics.player1.isComputer,
+      isPlayer2Computer: this.physics.player2.isComputer,
+      frames: this.recordingFrames,
+      ...(this.recordingReInits.length > 0 ? { roundReInits: this.recordingReInits } : {}),
+      finalScores: [this.scores[0], this.scores[1]],
+    });
+    this.recordingFrames = null;
+    this.recordingSeed = null;
+    this.recordingReInits = [];
+    this.pendingReInitMarker = null;
+    return replay;
   }
 
   get isPracticeMode(): boolean {

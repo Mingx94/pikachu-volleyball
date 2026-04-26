@@ -125,10 +125,29 @@ async function loadAndStart(progressBar: HTMLElement, loadingBox: HTMLElement): 
 
   const pikaVolley = new PikachuVolleyball(app.stage, sheet, sounds);
   setUpUI(pikaVolley, app.ticker);
-  app.ticker.maxFPS = pikaVolley.normalFPS;
-  // Application's TickerPlugin auto-renders the stage each tick, so this
-  // callback only needs to drive the game-state machine.
-  app.ticker.add(() => {
-    pikaVolley.gameLoop();
+
+  // Decouple simulation rate from render rate. The Pixi ticker fires at the
+  // browser's native refresh (RAF, ~60-144 Hz) and auto-renders the stage; a
+  // fixed-step accumulator inside the callback drives gameLoop() at exactly
+  // 25 Hz independent of monitor refresh. Pause halts both render-tick and
+  // accumulator so unpause resumes from the same sim state without burning
+  // accumulated wall-clock time. Max-step cap prevents the spiral of death
+  // when a tab returns from background with a large deltaMS.
+  const SIM_STEP_MS = 1000 / pikaVolley.normalFPS; // 40 ms at normalFPS = 25
+  const MAX_STEPS_PER_FRAME = 4;
+  let accumulator = 0;
+  app.ticker.add((ticker) => {
+    if (pikaVolley.paused) {
+      accumulator = 0;
+      return;
+    }
+    accumulator += ticker.deltaMS;
+    let steps = 0;
+    while (accumulator >= SIM_STEP_MS && steps < MAX_STEPS_PER_FRAME) {
+      pikaVolley.gameLoop();
+      accumulator -= SIM_STEP_MS;
+      steps++;
+    }
+    if (steps === MAX_STEPS_PER_FRAME) accumulator = 0; // drop catch-up debt
   });
 }

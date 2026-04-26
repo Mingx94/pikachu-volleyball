@@ -8,9 +8,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "oxlint",
-    "format": "oxfmt -w src vite.config.ts",
-    "format:check": "oxfmt --check src vite.config.ts"
+    "format": "oxfmt -w src vite.config.ts vitest.config.ts",
+    "format:check": "oxfmt --check src vite.config.ts vitest.config.ts"
   },
   "repository": {
     "type": "git",
@@ -31,7 +33,8 @@
     "oxlint": "^1.61.0",
     "typescript": "^6.0.3",
     "vite": "^8.0.10",
-    "vite-plugin-pwa": "^1.2.0"
+    "vite-plugin-pwa": "^1.2.0",
+    "vitest": "^4.1.5"
   },
   "dependencies": {
     "@pixi/sound": "^6.0.1",
