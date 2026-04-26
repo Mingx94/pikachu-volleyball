@@ -29,10 +29,31 @@
 import { letComputerDecideUserInput } from './ai.js';
 import { rand } from './rand.js';
 
-/** ground width */
+/**
+ * Default ground width — the original 1v1 court (432 px). 2v2 widens to
+ * {@link GROUND_WIDTH_2V2}; the active value lives on {@link PikaPhysics.groundWidth}
+ * (and is mirrored onto each {@link Player.groundWidth} / {@link Ball.groundWidth}
+ * so engine-internal free functions can read it from the object they already
+ * receive). The exported const is still used by tests and as the per-instance
+ * default when an object is constructed standalone.
+ */
 export const GROUND_WIDTH = 432;
-/** ground half-width, it is also the net pillar x coordinate */
+/**
+ * 2v2 ground width: 576 = 36 × 16, ~33% wider than 1v1 so two players per
+ * team have clear horizontal separation between front and back rows without
+ * making the canvas overflow on a typical desktop viewport. Multiples of 16
+ * keep the tiled background / wave layout flush.
+ */
+export const GROUND_WIDTH_2V2 = 576;
+/** Default ground half-width — net pillar x for 1v1. See {@link GROUND_WIDTH}. */
 export const GROUND_HALF_WIDTH = (GROUND_WIDTH / 2) | 0; // integer division
+/**
+ * 2v2 front-row spawn x offset from the net. P1/P2 spawn this many px from
+ * their side's net edge (left team: groundHalfWidth - 64, right team mirrored).
+ * Picked so the two front Pikachus are clearly inside the court but well clear
+ * of the net pillar; back-row teammates keep the original 1v1 baseline offset.
+ */
+const FRONT_ROW_SPAWN_OFFSET_FROM_NET = 64;
 /** player (Pikachu) length: width = height = 64 */
 export const PLAYER_LENGTH = 64;
 /** player half length */
@@ -105,6 +126,13 @@ export class PikaPhysics {
   player1: Player;
   player2: Player;
   ball: Ball;
+  /**
+   * Active ground width: 432 (1v1) or 576 (2v2). Mirrored onto each
+   * {@link Player.groundWidth} and {@link Ball.groundWidth} so engine free
+   * functions can read it off the object they already receive.
+   */
+  groundWidth: number;
+  groundHalfWidth: number;
 
   /**
    * Create a physics pack.
@@ -112,23 +140,44 @@ export class PikaPhysics {
    * Two-arg form (legacy 1v1): `new PikaPhysics(isPlayer1Computer, isPlayer2Computer)`.
    * Array form (1v1 or 2v2): `new PikaPhysics([{ isPlayer2, isComputer }, ...])` —
    * length must be 2 or 4.
+   *
+   * Optional `groundWidthOverride` exists for replay playback so an old replay
+   * recorded at GROUND_WIDTH=432 can still drive a 2v2 (4-player) match
+   * deterministically. New matches should not pass it; the player count alone
+   * picks the canonical width.
    */
   constructor(isPlayer1Computer: boolean, isPlayer2Computer: boolean);
-  constructor(configs: ReadonlyArray<PlayerConfig>);
-  constructor(a: boolean | ReadonlyArray<PlayerConfig>, b?: boolean) {
+  constructor(configs: ReadonlyArray<PlayerConfig>, groundWidthOverride?: number);
+  constructor(a: boolean | ReadonlyArray<PlayerConfig>, b?: boolean | number) {
     let configs: ReadonlyArray<PlayerConfig>;
+    let groundWidthOverride: number | undefined;
     if (typeof a === 'boolean') {
       configs = [
         { isPlayer2: false, isComputer: a },
-        { isPlayer2: true, isComputer: b ?? false },
+        { isPlayer2: true, isComputer: typeof b === 'boolean' ? b : false },
       ];
     } else {
       configs = a;
+      groundWidthOverride = typeof b === 'number' ? b : undefined;
     }
     if (configs.length !== 2 && configs.length !== 4) {
       throw new Error(`Unsupported player count: ${configs.length}`);
     }
-    this.players = configs.map((cfg) => new Player(cfg.isPlayer2, cfg.isComputer));
+    this.groundWidth =
+      groundWidthOverride ?? (configs.length === 4 ? GROUND_WIDTH_2V2 : GROUND_WIDTH);
+    this.groundHalfWidth = (this.groundWidth / 2) | 0;
+    // 2v2: front-row offset for slot 0 (P1) and slot 1 (P2); back-row slots
+    // (P3, P4) keep the 1v1 baseline offset (36). 1v1 always uses 36.
+    const frontOffset = this.groundHalfWidth - FRONT_ROW_SPAWN_OFFSET_FROM_NET;
+    this.players = configs.map((cfg, i) => {
+      const isFrontRow = configs.length === 4 && (i === 0 || i === 1);
+      return new Player(
+        cfg.isPlayer2,
+        cfg.isComputer,
+        this.groundWidth,
+        isFrontRow ? frontOffset : 36,
+      );
+    });
     const p1 = this.players[0];
     const p2 = this.players[1];
     if (p1 === undefined || p2 === undefined) {
@@ -136,7 +185,7 @@ export class PikaPhysics {
     }
     this.player1 = p1;
     this.player2 = p2;
-    this.ball = new Ball(false);
+    this.ball = new Ball(false, this.groundWidth);
   }
 
   /**
@@ -177,6 +226,20 @@ export class Player {
   isPlayer2: boolean; // 0xA0
   /** Is controlled by computer? */
   isComputer: boolean; // 0xA4
+  /**
+   * Active world width (432 in 1v1, 576 in 2v2). Set by {@link PikaPhysics}
+   * via the constructor so engine free functions can read it from the player
+   * they already hold a reference to.
+   */
+  groundWidth: number;
+  groundHalfWidth: number;
+  /**
+   * x distance from the player's own baseline (left team: from x=0; right
+   * team: mirrored, computed as `groundWidth - spawnXOffset`). 36 for 1v1
+   * and 2v2 back row (P3 / P4); `groundHalfWidth - 64` for 2v2 front row
+   * (P1 / P2). Used by {@link initializeForNewRound}.
+   */
+  spawnXOffset: number;
   /** -1: left, 0: no diving, 1: right */
   divingDirection = 0; // 0xB4
   lyingDownDurationLeft = -1; // 0xB8
@@ -247,10 +310,21 @@ export class Player {
    * create a player
    * @param isPlayer2 Is this player on the right side?
    * @param isComputer Is this player controlled by computer?
+   * @param groundWidth active world width (1v1 = 432, 2v2 = 576). Defaults
+   *   to {@link GROUND_WIDTH} for standalone construction.
+   * @param spawnXOffset x distance from this player's baseline, see field.
    */
-  constructor(isPlayer2: boolean, isComputer: boolean) {
+  constructor(
+    isPlayer2: boolean,
+    isComputer: boolean,
+    groundWidth: number = GROUND_WIDTH,
+    spawnXOffset: number = 36,
+  ) {
     this.isPlayer2 = isPlayer2; // 0xA0
     this.isComputer = isComputer; // 0xA4
+    this.groundWidth = groundWidth;
+    this.groundHalfWidth = (groundWidth / 2) | 0;
+    this.spawnXOffset = spawnXOffset;
     this.initializeForNewRound();
   }
 
@@ -258,9 +332,9 @@ export class Player {
    * initialize for new round
    */
   initializeForNewRound(): void {
-    this.x = 36; // 0xA8 // initialized to 36 (player1) or 396 (player2)
+    this.x = this.spawnXOffset; // 0xA8 // 1v1 / 2v2 back-row: 36; 2v2 front-row: groundHalfWidth - 64
     if (this.isPlayer2) {
-      this.x = GROUND_WIDTH - 36;
+      this.x = this.groundWidth - this.spawnXOffset;
     }
     this.y = PLAYER_TOUCHING_GROUND_Y_COORD; // 0xAC   // initialized to 244
     this.yVelocity = 0; // 0xB0  // initialized to 0
@@ -322,11 +396,18 @@ export class Ball {
   /** is power hit */
   isPowerHit = false; // 0x68
 
+  /** Active world width (1v1 = 432, 2v2 = 576). See {@link Player.groundWidth}. */
+  groundWidth: number;
+  groundHalfWidth: number;
+
   /**
    * Create a ball
    * @param isPlayer2Serve Will player 2 serve on this new round?
+   * @param groundWidth active world width; defaults to {@link GROUND_WIDTH}.
    */
-  constructor(isPlayer2Serve: boolean) {
+  constructor(isPlayer2Serve: boolean, groundWidth: number = GROUND_WIDTH) {
+    this.groundWidth = groundWidth;
+    this.groundHalfWidth = (groundWidth / 2) | 0;
     this.initializeForNewRound(isPlayer2Serve);
   }
 
@@ -335,9 +416,9 @@ export class Ball {
    * @param isPlayer2Serve will player on the right side serve on this new round?
    */
   initializeForNewRound(isPlayer2Serve: boolean): void {
-    this.x = 56; // 0x30    // initialized to 56 or 376
+    this.x = 56; // 0x30    // initialized to 56 or (groundWidth - 56)
     if (isPlayer2Serve === true) {
-      this.x = GROUND_WIDTH - 56;
+      this.x = this.groundWidth - 56;
     }
     this.y = 0; // 0x34   // initialized to 0
     this.xVelocity = 0; // 0x38  // initialized to 0
@@ -532,14 +613,14 @@ function clampPlayerToFieldSide(player: Player): void {
   if (player.isPlayer2 === false) {
     if (player.x < PLAYER_HALF_LENGTH) {
       player.x = PLAYER_HALF_LENGTH;
-    } else if (player.x > GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH) {
-      player.x = GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH;
+    } else if (player.x > player.groundHalfWidth - PLAYER_HALF_LENGTH) {
+      player.x = player.groundHalfWidth - PLAYER_HALF_LENGTH;
     }
   } else {
-    if (player.x < GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH) {
-      player.x = GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH;
-    } else if (player.x > GROUND_WIDTH - PLAYER_HALF_LENGTH) {
-      player.x = GROUND_WIDTH - PLAYER_HALF_LENGTH;
+    if (player.x < player.groundHalfWidth + PLAYER_HALF_LENGTH) {
+      player.x = player.groundHalfWidth + PLAYER_HALF_LENGTH;
+    } else if (player.x > player.groundWidth - PLAYER_HALF_LENGTH) {
+      player.x = player.groundWidth - PLAYER_HALF_LENGTH;
     }
   }
 }
@@ -609,7 +690,7 @@ function processCollisionBetweenBallAndWorldAndSetBallPosition(
     If apply (futureBallX > (GROUND_WIDTH - BALL_RADIUS)), and if the maximum number of loop is not limited,
     it is observed that infinite loop in the function expectedLandingPointXWhenPowerHit does not terminate.
   */
-  if (futureBallX < BALL_RADIUS || futureBallX > GROUND_WIDTH) {
+  if (futureBallX < BALL_RADIUS || futureBallX > ball.groundWidth) {
     ball.xVelocity = -ball.xVelocity;
   }
 
@@ -621,7 +702,7 @@ function processCollisionBetweenBallAndWorldAndSetBallPosition(
 
   // If ball touches net
   if (
-    Math.abs(ball.x - GROUND_HALF_WIDTH) < NET_PILLAR_HALF_WIDTH &&
+    Math.abs(ball.x - ball.groundHalfWidth) < NET_PILLAR_HALF_WIDTH &&
     ball.y > NET_PILLAR_TOP_TOP_Y_COORD
   ) {
     if (ball.y <= NET_PILLAR_TOP_BOTTOM_Y_COORD) {
@@ -629,7 +710,7 @@ function processCollisionBetweenBallAndWorldAndSetBallPosition(
         ball.yVelocity = -ball.yVelocity;
       }
     } else {
-      if (ball.x < GROUND_HALF_WIDTH) {
+      if (ball.x < ball.groundHalfWidth) {
         ball.xVelocity = -Math.abs(ball.xVelocity);
       } else {
         ball.xVelocity = Math.abs(ball.xVelocity);
@@ -705,15 +786,15 @@ function processPlayerMovementAndSetPlayerPosition(
     // if player is player1
     if (futurePlayerX < PLAYER_HALF_LENGTH) {
       player.x = PLAYER_HALF_LENGTH;
-    } else if (futurePlayerX > GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH) {
-      player.x = GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH;
+    } else if (futurePlayerX > player.groundHalfWidth - PLAYER_HALF_LENGTH) {
+      player.x = player.groundHalfWidth - PLAYER_HALF_LENGTH;
     }
   } else {
     // if player is player2
-    if (futurePlayerX < GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH) {
-      player.x = GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH;
-    } else if (futurePlayerX > GROUND_WIDTH - PLAYER_HALF_LENGTH) {
-      player.x = GROUND_WIDTH - PLAYER_HALF_LENGTH;
+    if (futurePlayerX < player.groundHalfWidth + PLAYER_HALF_LENGTH) {
+      player.x = player.groundHalfWidth + PLAYER_HALF_LENGTH;
+    } else if (futurePlayerX > player.groundWidth - PLAYER_HALF_LENGTH) {
+      player.x = player.groundWidth - PLAYER_HALF_LENGTH;
     }
   }
 
@@ -878,7 +959,7 @@ function processCollisionBetweenBallAndPlayer(
 
   // player is jumping and power hitting
   if (playerState === 2) {
-    if (ball.x < GROUND_HALF_WIDTH) {
+    if (ball.x < ball.groundHalfWidth) {
       ball.xVelocity = (Math.abs(userInput.xDirection) + 1) * 10;
     } else {
       ball.xVelocity = -(Math.abs(userInput.xDirection) + 1) * 10;
@@ -917,7 +998,7 @@ function calculateExpectedLandingPointXFor(ball: Ball): void {
     loopCounter++;
 
     const futureCopyBallX = copyBall.xVelocity + copyBall.x;
-    if (futureCopyBallX < BALL_RADIUS || futureCopyBallX > GROUND_WIDTH) {
+    if (futureCopyBallX < BALL_RADIUS || futureCopyBallX > ball.groundWidth) {
       copyBall.xVelocity = -copyBall.xVelocity;
     }
     if (copyBall.y + copyBall.yVelocity < 0) {
@@ -926,7 +1007,7 @@ function calculateExpectedLandingPointXFor(ball: Ball): void {
 
     // If copy ball touches net
     if (
-      Math.abs(copyBall.x - GROUND_HALF_WIDTH) < NET_PILLAR_HALF_WIDTH &&
+      Math.abs(copyBall.x - ball.groundHalfWidth) < NET_PILLAR_HALF_WIDTH &&
       copyBall.y > NET_PILLAR_TOP_TOP_Y_COORD
     ) {
       // It maybe should be <= NET_PILLAR_TOP_BOTTOM_Y_COORD as in FUN_00402dc0, is it the original game author's mistake?
@@ -935,7 +1016,7 @@ function calculateExpectedLandingPointXFor(ball: Ball): void {
           copyBall.yVelocity = -copyBall.yVelocity;
         }
       } else {
-        if (copyBall.x < GROUND_HALF_WIDTH) {
+        if (copyBall.x < ball.groundHalfWidth) {
           copyBall.xVelocity = -Math.abs(copyBall.xVelocity);
         } else {
           copyBall.xVelocity = Math.abs(copyBall.xVelocity);

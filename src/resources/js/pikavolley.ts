@@ -137,8 +137,31 @@ export class PikachuVolleyball {
   /** number of elapsed normal fps frames for rendering slow motion */
   slowMotionNumOfSkippedFrames = 0;
 
-  /** 0: with computer, 1: with friend */
+  /** 0: with computer, 1: with friend. Legacy — slot picker replaced this. */
   selectedWithWho = 0;
+  /** 0: 1v1, 1: 2v2 — what the user has highlighted in the menu picker. */
+  selectedMode: 0 | 1 = 0;
+  /**
+   * Menu slot cursor: 0..N-1 highlights player slot N+1; equals playerCount
+   * when the cursor is on the START row. Persists across menu visits so
+   * returning to the menu doesn't lose the user's place.
+   */
+  selectedSlot: 0 | 1 | 2 | 3 | 4 = 0;
+  /**
+   * Per-slot human/CPU state for the menu's slot picker. Always length 4 —
+   * even 1v1 keeps four entries so the user's 2v2 picks survive a 1v1 →
+   * 2v2 round trip. Default: P1 human, others CPU (matches the legacy
+   * "with computer" UX where whoever pressed power-hit was human).
+   */
+  slotIsHuman: boolean[] = [true, false, false, false];
+
+  /**
+   * Previous-frame d-pad state for the menu so navigation fires once per
+   * key press instead of every frame the key is held. Reset to 0/0 each
+   * time we enter the menu state.
+   */
+  private menuPrevXDir = 0;
+  private menuPrevYDir = 0;
 
   /** [0] for player 1 score, [1] for player 2 score */
   scores: [number, number] = [0, 0];
@@ -203,6 +226,13 @@ export class PikachuVolleyball {
   private replayFrames: ReadonlyArray<ReplayInputFrame> | null = null;
   private replayCursor = 0;
 
+  /**
+   * Optional renderer-resize callback wired up by main.ts. Used by
+   * {@link rebuildForMode} to grow / shrink the canvas to match the active
+   * mode's `groundWidth` (1v1 = 432, 2v2 = 576). Null means no-op (e.g. tests).
+   */
+  private resizeRenderer: ((w: number, h: number) => void) | null = null;
+
   /** The game state which is being rendered now */
   state: GameState;
 
@@ -219,10 +249,15 @@ export class PikachuVolleyball {
     // PikaPhysics player count from the very first frame (no transient
     // 1v1 view rendering 4-player physics).
     this.mode = loadModeFromStorage();
+    // Build physics FIRST so GameView's bg / wave / cloud spread is sized
+    // for the active groundWidth. Without this, a 2v2 session loaded from
+    // localStorage gets a 432-wide GameView background while the canvas
+    // resizes to 576 — the right slice of the field renders blank black.
+    this.physics = makePhysicsForMode(this.mode);
     this.view = {
       intro: new IntroView(sheet),
       menu: new MenuView(sheet),
-      game: new GameView(sheet, this.mode === '2v2' ? 4 : 2),
+      game: new GameView(sheet, this.mode === '2v2' ? 4 : 2, this.physics.groundWidth),
       fadeInOut: new FadeInOut(sheet),
     };
     stage.addChild(this.view.intro.container);
@@ -235,35 +270,60 @@ export class PikachuVolleyball {
     this.view.fadeInOut.visible = false;
 
     this.audio = new PikaAudio(sounds);
-    this.physics = makePhysicsForMode(this.mode);
     this.keyboardArray = makeKeyboardsForMode(this.mode);
 
     this.state = this.intro;
   }
 
   /**
-   * Switch between 1v1 and 2v2. Rebuilds physics, keyboards, and the game
-   * view's player sprites; unsubscribes old key listeners; resets state to
-   * intro so a half-played match doesn't leak into the new mode.
+   * Wire up a renderer-resize callback so {@link rebuildForMode} can grow /
+   * shrink the canvas to match the new mode's `groundWidth`. Called once by
+   * main.ts after construction.
    */
-  setMode(mode: GameMode): void {
-    if (this.mode === mode) return;
-    this.mode = mode;
-    localStorageWrapper.set('pv-offline-mode', mode);
+  setRendererResizer(fn: (w: number, h: number) => void): void {
+    this.resizeRenderer = fn;
+  }
+
+  /**
+   * Internal: rebuild physics / keyboards / GameView and resize canvas to the
+   * given mode. Does NOT touch the state machine, so callers in mid-flow
+   * (e.g. the menu picker just before `afterMenuSelection`) can switch mode
+   * without bouncing back to intro. The {@link setMode} public wrapper adds
+   * the historical `restart()` for ui.ts-style "switch then start over" UX.
+   */
+  private rebuildForMode(mode: GameMode): void {
+    if (this.mode !== mode) {
+      this.mode = mode;
+      localStorageWrapper.set('pv-offline-mode', mode);
+    }
     for (const kb of this.keyboardArray) kb.unsubscribe();
     this.physics = makePhysicsForMode(mode);
     this.keyboardArray = makeKeyboardsForMode(mode);
     // Rebuild GameView so its playerSprites array matches the new player
-    // count. Old game view is replaced wholesale; cleanest path given the
-    // sprite array is a constructor-time decision in view.ts.
+    // count and its background tiles span the new groundWidth. Old view is
+    // replaced wholesale; cleanest path given the sprite array is a
+    // constructor-time decision in view.ts.
     this.stage.removeChild(this.view.game.container);
-    this.view.game = new GameView(this.sheet, mode === '2v2' ? 4 : 2);
+    this.view.game = new GameView(this.sheet, mode === '2v2' ? 4 : 2, this.physics.groundWidth);
     // Re-insert at the same z-order: behind fadeInOut, in front of menu.
     this.stage.addChildAt(
       this.view.game.container,
       this.stage.getChildIndex(this.view.fadeInOut.black),
     );
     this.view.game.visible = false;
+    // Match canvas / fade overlay to the new groundWidth.
+    this.view.fadeInOut.resize(this.physics.groundWidth);
+    this.resizeRenderer?.(this.physics.groundWidth, 304);
+  }
+
+  /**
+   * Public mode switch (kept for parity with the old API and any future
+   * external caller). Rebuilds and forces a fresh start at intro so a
+   * half-played match doesn't leak into the new mode.
+   */
+  setMode(mode: GameMode): void {
+    if (this.mode === mode) return;
+    this.rebuildForMode(mode);
     this.restart();
   }
 
@@ -297,6 +357,14 @@ export class PikachuVolleyball {
       this.view.intro.visible = true;
       this.view.fadeInOut.setBlackAlphaTo(0);
       this.audio.sounds.bgm.stop();
+      // Intro and menu always render with the original 1v1 layout (sprites
+      // are positioned at 216 = half of 432). If we're returning from a 2v2
+      // round, shrink the canvas back so the menu doesn't render with empty
+      // black space on the right.
+      if (this.physics.groundWidth !== 432) {
+        this.view.fadeInOut.resize(432);
+        this.resizeRenderer?.(432, 304);
+      }
     }
     this.view.intro.drawMark(this.frameCounter);
     this.frameCounter++;
@@ -314,20 +382,40 @@ export class PikachuVolleyball {
     }
   }
 
-  /** Menu: select who do you want to play. With computer? With friend? */
+  /**
+   * Menu: pick mode (1v1 / 2v2) with ←→, navigate the per-slot human/CPU
+   * picker with ↑↓, toggle a slot with power-hit, and launch the game by
+   * pressing power-hit on the START row at the bottom of the list. Idle
+   * timeout still launches with whatever's currently highlighted (demo mode
+   * is "all four slots CPU + select START").
+   */
   menu(): void {
     if (this.frameCounter === 0) {
       this.view.menu.visible = true;
       this.view.fadeInOut.setBlackAlphaTo(0);
-      this.selectedWithWho = 0;
-      this.view.menu.selectWithWho(this.selectedWithWho);
+      // Mode highlight defaults to the currently active mode (loaded from
+      // localStorage). Slot cursor defaults to START so a quick power-hit
+      // launches with the existing config without forcing the user to
+      // navigate down through all slots first.
+      this.selectedMode = this.mode === '2v2' ? 1 : 0;
+      this.view.menu.selectMode(this.selectedMode);
+      const initialPlayerCount = this.selectedMode === 1 ? 4 : 2;
+      this.selectedSlot = initialPlayerCount as 0 | 1 | 2 | 3 | 4;
+      this.view.menu.selectSlot(this.selectedSlot);
+      // Reset d-pad edge tracking so navigation only fires on a fresh press
+      // after re-entering the menu (e.g. a held key carrying over from the
+      // intro state doesn't auto-scroll the cursor).
+      this.menuPrevXDir = 0;
+      this.menuPrevYDir = 0;
     }
+    const visiblePlayerCount: 2 | 4 = this.selectedMode === 1 ? 4 : 2;
     this.view.menu.drawFightMessage(this.frameCounter);
     this.view.menu.drawSachisoft(this.frameCounter);
     this.view.menu.drawSittingPikachuTiles(this.frameCounter);
     this.view.menu.drawPikachuVolleyballMessage(this.frameCounter);
     this.view.menu.drawPokemonMessage(this.frameCounter);
-    this.view.menu.drawWithWhoMessages(this.frameCounter);
+    this.view.menu.drawModeMessages(this.frameCounter);
+    this.view.menu.drawSlotList(this.frameCounter, visiblePlayerCount, this.slotIsHuman);
     this.frameCounter++;
 
     if (
@@ -342,62 +430,113 @@ export class PikachuVolleyball {
       return;
     }
 
-    if (
-      (this.keyboardArray[0].yDirection === -1 || this.keyboardArray[1].yDirection === -1) &&
-      this.selectedWithWho === 1
-    ) {
-      this.noInputFrameCounter = 0;
-      this.selectedWithWho = 0;
-      this.view.menu.selectWithWho(this.selectedWithWho);
+    let movedThisFrame = false;
+
+    // Edge-detect the d-pad so holding a direction doesn't auto-scroll. A
+    // press only fires when the input transitions from 0 → ±1; the user
+    // has to release and re-press for each step.
+    const yDirRaw =
+      this.keyboardArray[0].yDirection !== 0
+        ? this.keyboardArray[0].yDirection
+        : this.keyboardArray[1].yDirection;
+    const yPressed = yDirRaw !== 0 && this.menuPrevYDir === 0 ? yDirRaw : 0;
+    this.menuPrevYDir = yDirRaw;
+
+    // ↑↓ navigates the slot cursor. Range: 0..visiblePlayerCount (inclusive),
+    // where visiblePlayerCount itself is the START row.
+    if (yPressed === -1 && this.selectedSlot > 0) {
+      this.selectedSlot = (this.selectedSlot - 1) as 0 | 1 | 2 | 3 | 4;
+      this.view.menu.selectSlot(this.selectedSlot);
       this.audio.sounds.pi.play();
-    } else if (
-      (this.keyboardArray[0].yDirection === 1 || this.keyboardArray[1].yDirection === 1) &&
-      this.selectedWithWho === 0
-    ) {
-      this.noInputFrameCounter = 0;
-      this.selectedWithWho = 1;
-      this.view.menu.selectWithWho(this.selectedWithWho);
+      movedThisFrame = true;
+    } else if (yPressed === 1 && this.selectedSlot < visiblePlayerCount) {
+      this.selectedSlot = (this.selectedSlot + 1) as 0 | 1 | 2 | 3 | 4;
+      this.view.menu.selectSlot(this.selectedSlot);
       this.audio.sounds.pi.play();
+      movedThisFrame = true;
+    }
+
+    // ←→ flips the 1v1 / 2v2 mode highlight. When playerCount shrinks the
+    // cursor may land out of bounds — clamp to the new START position.
+    const xDirRaw =
+      this.keyboardArray[0].xDirection !== 0
+        ? this.keyboardArray[0].xDirection
+        : this.keyboardArray[1].xDirection;
+    const xPressed = xDirRaw !== 0 && this.menuPrevXDir === 0 ? xDirRaw : 0;
+    this.menuPrevXDir = xDirRaw;
+    if (xPressed === -1 && this.selectedMode === 1) {
+      this.selectedMode = 0;
+      this.view.menu.selectMode(this.selectedMode);
+      this.audio.sounds.pi.play();
+      movedThisFrame = true;
+    } else if (xPressed === 1 && this.selectedMode === 0) {
+      this.selectedMode = 1;
+      this.view.menu.selectMode(this.selectedMode);
+      this.audio.sounds.pi.play();
+      movedThisFrame = true;
+    }
+    const newPlayerCount = this.selectedMode === 1 ? 4 : 2;
+    if (this.selectedSlot > newPlayerCount) {
+      this.selectedSlot = newPlayerCount as 0 | 1 | 2 | 3 | 4;
+      this.view.menu.selectSlot(this.selectedSlot);
+    }
+
+    if (movedThisFrame) {
+      this.noInputFrameCounter = 0;
     } else {
       this.noInputFrameCounter++;
     }
 
-    if (this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1) {
-      // Slot defaults follow the existing 1v1 menu UX, generalized:
-      //   "with friend" (selectedWithWho === 1):
-      //     1v1 → P1+P2 human; 2v2 → P1+P2 human, P3+P4 CPU teammates
-      //   "with computer" (selectedWithWho === 0):
-      //     human is whoever pressed power-hit; everyone else CPU
-      if (this.selectedWithWho === 1) {
-        for (const p of this.physics.players) p.isComputer = false;
-        if (this.physics.players.length >= 4) {
-          // P3 and P4 are AI teammates — keep them CPU when picking "with friend"
-          for (let i = 2; i < this.physics.players.length; i++) {
-            const slot = this.physics.players[i];
-            if (slot !== undefined) slot.isComputer = true;
-          }
-        }
+    const powerHitPressed =
+      this.keyboardArray[0].powerHit === 1 ||
+      this.keyboardArray[1].powerHit === 1 ||
+      this.keyboardArray[2]?.powerHit === 1 ||
+      this.keyboardArray[3]?.powerHit === 1;
+    if (powerHitPressed) {
+      const slotIdx = this.selectedSlot;
+      if (slotIdx === newPlayerCount) {
+        this.launchFromMenu();
       } else {
-        for (const p of this.physics.players) p.isComputer = true;
-        if (this.keyboardArray[0].powerHit === 1) {
-          this.physics.player1.isComputer = false;
-        } else if (this.keyboardArray[1].powerHit === 1) {
-          this.physics.player2.isComputer = false;
-        }
+        // Slot toggle. Don't reset frameCounter — stay in the menu so the
+        // user can keep tweaking. `pi` for the small click feedback.
+        const cur = this.slotIsHuman[slotIdx];
+        if (cur !== undefined) this.slotIsHuman[slotIdx] = !cur;
+        this.audio.sounds.pi.play();
+        this.noInputFrameCounter = 0;
       }
-      this.audio.sounds.pikachu.play();
-      this.frameCounter = 0;
-      this.noInputFrameCounter = 0;
-      this.state = this.afterMenuSelection;
       return;
     }
 
     if (this.noInputFrameCounter >= this.noInputFrameTotal.menu) {
-      for (const p of this.physics.players) p.isComputer = true;
-      this.frameCounter = 0;
-      this.noInputFrameCounter = 0;
-      this.state = this.afterMenuSelection;
+      this.launchFromMenu();
     }
+  }
+
+  /**
+   * Apply the menu's selected mode + slot config to physics and transition
+   * to {@link afterMenuSelection}. Shared by the START-row power-hit path
+   * and the idle-timeout path so both end up identical.
+   */
+  private launchFromMenu(): void {
+    const targetMode: GameMode = this.selectedMode === 1 ? '2v2' : '1v1';
+    // rebuildForMode is a no-op when the chosen mode equals the current one
+    // — but we still need to make sure the canvas matches the active
+    // groundWidth (intro() may have shrunk it back to 432 even though
+    // physics is in 2v2 mode).
+    if (targetMode !== this.mode) {
+      this.rebuildForMode(targetMode);
+    } else {
+      this.view.fadeInOut.resize(this.physics.groundWidth);
+      this.resizeRenderer?.(this.physics.groundWidth, 304);
+    }
+    for (let i = 0; i < this.physics.players.length; i++) {
+      const slot = this.physics.players[i];
+      if (slot !== undefined) slot.isComputer = !this.slotIsHuman[i];
+    }
+    this.audio.sounds.pikachu.play();
+    this.frameCounter = 0;
+    this.noInputFrameCounter = 0;
+    this.state = this.afterMenuSelection;
   }
 
   /** Fade out after menu selection */
@@ -673,16 +812,35 @@ export class PikachuVolleyball {
   startReplay(replay: Replay): void {
     setCustomRng(mulberry32(replay.seed));
     const playerCount = replay.playerCount ?? 2;
+    // Old 2v2 replays were captured at GROUND_WIDTH=432. New ones carry
+    // groundWidth explicitly; default to 432 for backward compat so old
+    // recordings still play deterministically.
+    const replayGroundWidth = replay.groundWidth ?? 432;
     if (playerCount === 2) {
       this.physics = new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer);
     } else {
-      this.physics = new PikaPhysics([
-        { isPlayer2: false, isComputer: replay.isPlayer1Computer },
-        { isPlayer2: true, isComputer: replay.isPlayer2Computer },
-        { isPlayer2: false, isComputer: replay.isPlayer3Computer ?? true },
-        { isPlayer2: true, isComputer: replay.isPlayer4Computer ?? true },
-      ]);
+      this.physics = new PikaPhysics(
+        [
+          { isPlayer2: false, isComputer: replay.isPlayer1Computer },
+          { isPlayer2: true, isComputer: replay.isPlayer2Computer },
+          { isPlayer2: false, isComputer: replay.isPlayer3Computer ?? true },
+          { isPlayer2: true, isComputer: replay.isPlayer4Computer ?? true },
+        ],
+        replayGroundWidth,
+      );
     }
+    // Sync the controller's mode tag and rebuild the GameView / canvas so
+    // sprite count and tile spread match the replay's player count + width.
+    const replayMode: GameMode = playerCount === 4 ? '2v2' : '1v1';
+    this.mode = replayMode;
+    this.stage.removeChild(this.view.game.container);
+    this.view.game = new GameView(this.sheet, playerCount, this.physics.groundWidth);
+    this.stage.addChildAt(
+      this.view.game.container,
+      this.stage.getChildIndex(this.view.fadeInOut.black),
+    );
+    this.view.fadeInOut.resize(this.physics.groundWidth);
+    this.resizeRenderer?.(this.physics.groundWidth, 304);
     this.scores = [0, 0];
     this.gameEnded = false;
     this.roundEnded = false;
@@ -734,6 +892,7 @@ export class PikachuVolleyball {
             playerCount: 4 as const,
             isPlayer3Computer: this.physics.players[2]?.isComputer ?? true,
             isPlayer4Computer: this.physics.players[3]?.isComputer ?? true,
+            groundWidth: this.physics.groundWidth,
           }
         : {}),
       frames: [...this.recordingFrames],

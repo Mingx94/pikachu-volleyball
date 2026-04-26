@@ -54,8 +54,9 @@
 
 | 常數                             | 值   | 含義                                                               |
 | -------------------------------- | ---- | ------------------------------------------------------------------ |
-| `GROUND_WIDTH`                   | 432  | 場地寬度（完整賽場）                                               |
-| `GROUND_HALF_WIDTH`              | 216  | 場地半寬，也是網柱 x 座標                                          |
+| `GROUND_WIDTH`                   | 432  | 1v1 場地寬度；2v2 改用 `GROUND_WIDTH_2V2 = 576`                    |
+| `GROUND_WIDTH_2V2`               | 576  | 2v2 場地寬度（4/3 倍寬，多塞一組前後排不擠）                       |
+| `GROUND_HALF_WIDTH`              | 216  | 1v1 場地半寬，也是 1v1 網柱 x 座標                                 |
 | `PLAYER_LENGTH`                  | 64   | Pikachu 寬高（皮卡丘是正方形碰撞箱）                               |
 | `PLAYER_HALF_LENGTH`             | 32   | Pikachu 半長                                                       |
 | `PLAYER_TOUCHING_GROUND_Y_COORD` | 244  | 玩家站在地上時的 y                                                 |
@@ -66,7 +67,9 @@
 | `NET_PILLAR_TOP_BOTTOM_Y_COORD`  | 192  | 網柱頂端的下緣 y                                                   |
 | `INFINITE_LOOP_LIMIT`            | 1000 | 預測落地點迴圈的安全上限（**這個是本實作新增的**，原始機器碼沒有） |
 
-座標系：x ∈ [0, 432]（向右增加），y ∈ [0, 304]（向下增加）。
+座標系：1v1 是 x ∈ [0, 432]，2v2 是 x ∈ [0, 576]；y ∈ [0, 304]（向下增加）。
+
+**per-instance 寬度**：本實作把場地寬度從 module-level 常數泛化成 `PikaPhysics.groundWidth` / `Player.groundWidth` / `Ball.groundWidth`（在 PikaPhysics 建構時鏡射），所以引擎內部所有 free function（牆壁反彈、半場 clamp、網柱判斷、AI 預測落地點……）都是讀傳進來的物件的 `groundWidth` / `groundHalfWidth`，不是讀 const。1v1 走預設 432，行為與原作完全一致；2v2 走 576。下面各章引用的「`GROUND_WIDTH`」描述的是「世界寬度」這個概念，1v1 下等於常數，2v2 下值不同但邏輯一致。
 
 ## 可重現原作行為的注意事項
 

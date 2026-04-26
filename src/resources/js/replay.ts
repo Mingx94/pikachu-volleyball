@@ -74,6 +74,14 @@ export interface Replay {
    * `2`. Each `frames[i]` must have length matching this.
    */
   playerCount?: 2 | 4;
+  /**
+   * Active world width during recording: 432 (1v1, the original / default)
+   * or 576 (2v2 on the wider court). Optional — replays captured before
+   * the wider 2v2 court existed (1v1 in any era; 2v2 between feature add and
+   * width doubling) lack this field, so the loader defaults it to 432 to
+   * keep their playback bit-perfect.
+   */
+  groundWidth?: number;
   frames: ReadonlyArray<ReplayInputFrame>;
   /**
    * Optional inter-round reInit markers. Absent or empty for single-round
@@ -159,15 +167,21 @@ export function snapshotInputs(inputs: readonly PikaUserInput[]): ReplayInputFra
 export function* runReplayStreaming(replay: Replay): Generator<PikaPhysics, PikaPhysics, void> {
   setCustomRng(mulberry32(replay.seed));
   const playerCount = replay.playerCount ?? 2;
+  // Default 432 keeps old recordings (which don't carry groundWidth)
+  // bit-perfect — they were captured at the original 432-wide court.
+  const groundWidth = replay.groundWidth ?? 432;
   const physics =
     playerCount === 2
       ? new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer)
-      : new PikaPhysics([
-          { isPlayer2: false, isComputer: replay.isPlayer1Computer },
-          { isPlayer2: true, isComputer: replay.isPlayer2Computer },
-          { isPlayer2: false, isComputer: replay.isPlayer3Computer ?? true },
-          { isPlayer2: true, isComputer: replay.isPlayer4Computer ?? true },
-        ]);
+      : new PikaPhysics(
+          [
+            { isPlayer2: false, isComputer: replay.isPlayer1Computer },
+            { isPlayer2: true, isComputer: replay.isPlayer2Computer },
+            { isPlayer2: false, isComputer: replay.isPlayer3Computer ?? true },
+            { isPlayer2: true, isComputer: replay.isPlayer4Computer ?? true },
+          ],
+          groundWidth,
+        );
   const reInits = replay.roundReInits ?? [];
   let reInitIdx = 0;
   for (let i = 0; i < replay.frames.length; i++) {
@@ -213,6 +227,12 @@ export function buildReplay(args: {
   isPlayer4Computer?: boolean;
   /** 2 (default) or 4. Omit / set to 2 for 1v1; set to 4 for 2v2. */
   playerCount?: 2 | 4;
+  /**
+   * Active world width during the recording. Omit for 1v1 (defaults to 432);
+   * set to 576 for 2v2 on the wider court so old replays default-loaded as
+   * 432 are still loadable.
+   */
+  groundWidth?: number;
   roundReInits?: ReadonlyArray<RoundReInit>;
   finalScores?: readonly [number, number];
 }): Replay {
@@ -230,6 +250,9 @@ export function buildReplay(args: {
       isPlayer3Computer: args.isPlayer3Computer ?? true,
       isPlayer4Computer: args.isPlayer4Computer ?? true,
     };
+  }
+  if (args.groundWidth !== undefined && args.groundWidth !== 432) {
+    replay = { ...replay, groundWidth: args.groundWidth };
   }
   if (args.roundReInits !== undefined && args.roundReInits.length > 0) {
     replay = { ...replay, roundReInits: args.roundReInits };

@@ -92,15 +92,15 @@ if (player.state < 5) {
 
 ```ts
 if (!player.isPlayer2) {
-  // 玩家 1：x 限制在 [PLAYER_HALF_LENGTH, GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH]
-  //                = [32, 184]
+  // 玩家 1：x 限制在 [PLAYER_HALF_LENGTH, groundHalfWidth - PLAYER_HALF_LENGTH]
+  //                = [32, 184]  in 1v1   /   [32, 256]  in 2v2
 } else {
-  // 玩家 2：x 限制在 [GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH, GROUND_WIDTH - PLAYER_HALF_LENGTH]
-  //                = [248, 400]
+  // 玩家 2：x 限制在 [groundHalfWidth + PLAYER_HALF_LENGTH, groundWidth - PLAYER_HALF_LENGTH]
+  //                = [248, 400] in 1v1   /   [320, 544] in 2v2
 }
 ```
 
-也就是說玩家**的方塊邊緣**剛好可以貼到自己的左 / 右牆和網柱中線，但不能跨越。網柱本身寬 50（`NET_PILLAR_HALF_WIDTH * 2 = 50`），所以兩邊玩家都離不開網柱本體 — 這是設計上的禁區。
+也就是說玩家**的方塊邊緣**剛好可以貼到自己的左 / 右牆和網柱中線，但不能跨越。網柱本身寬 50（`NET_PILLAR_HALF_WIDTH * 2 = 50`），所以兩邊玩家都離不開網柱本體 — 這是設計上的禁區。`groundWidth` / `groundHalfWidth` 是 per-Player instance 欄位（由 PikaPhysics 建構時注入），不是 module const，所以 1v1（432）跟 2v2（576）共用同一份程式碼。
 
 ## 6. 跳躍
 
@@ -248,7 +248,11 @@ Controller（`pikavolley.ts:playSoundEffect()`）讀完旗標後會呼叫 `audio
 > 對應原始碼：`physics.ts:processPlayerToPlayerCollisions`、`resolveTeammatePair`
 > 觸發時機：`physicsEngine` 內，每 tick 玩家移動結束、球-玩家碰撞之前。
 
-原作只支援 1v1，玩家彼此不會碰撞（隔著網柱）。2v2 模式新增 4 個 slot 後，同隊的兩位皮卡丘會共享同半場 — 必須處理隊友間的碰撞。本實作的解析規則：
+原作只支援 1v1，玩家彼此不會碰撞（隔著網柱）。2v2 模式新增 4 個 slot 後，同隊的兩位皮卡丘會共享同半場 — 必須處理隊友間的碰撞。
+
+**起始站位（避免重疊）**：`Player` 多了 `spawnXOffset` 欄位，`initializeForNewRound()` 用 `this.x = isPlayer2 ? groundWidth - spawnXOffset : spawnXOffset`。1v1 時 P1 / P2 的 `spawnXOffset` 都是原作的 36，所以 x=36 / x=432-36=396，與原作完全一致。2v2 時 `PikaPhysics` constructor 把 P1 / P2（slot 0、1）改成「前排」`spawnXOffset = groundHalfWidth - FRONT_ROW_SPAWN_OFFSET_FROM_NET`（= 288 - 64 = 224，靠網），P3 / P4（slot 2、3）維持「後排」36（靠底線）。所以 2v2 開場左隊 P1 在 x=224、P3 在 x=36；右隊 P2 在 x=576-224=352、P4 在 x=576-36=540 — 四隻不重疊。
+
+本實作的解析規則：
 
 每 tick 開頭把所有玩家的 `hasPlayerOnHead`、`standingOnTeammate` 重設為 `false`，然後對每組同 `isPlayer2`（即同隊）的配對 `(A, B)`：
 

@@ -193,7 +193,8 @@ describe('PikaPhysics — 2v2 teammate collisions', () => {
     expect(p3.x).toBe(68);
     // both still on the left half-field
     expect(p3.x).toBeGreaterThanOrEqual(32); // PLAYER_HALF_LENGTH
-    expect(p1.x).toBeLessThanOrEqual(216 - 32); // GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH
+    // 2v2 runs on the wider court so groundHalfWidth = 288, left half ends at 256.
+    expect(p1.x).toBeLessThanOrEqual(288 - 32); // groundHalfWidth - PLAYER_HALF_LENGTH
   });
 
   it('horizontal push clamps the loser inside the team half-field', () => {
@@ -201,15 +202,17 @@ describe('PikaPhysics — 2v2 teammate collisions', () => {
     const p1 = physics.players[0];
     const p3 = physics.players[2];
     if (!p1 || !p3) throw new Error('expected 4 players');
-    // P1 already at the right edge of its half, P3 just to its left.
-    p1.x = 216 - 32; // 184 = max left-half x
-    p3.x = 184 - 10; // overlap of 54 in x
+    // 2v2 court is 576 wide so the left team's right wall is groundHalfWidth - 32 = 256.
+    const leftHalfRightEdge = 288 - 32;
+    p1.x = leftHalfRightEdge; // 256 = max left-half x
+    p3.x = leftHalfRightEdge - 10; // overlap of 54 in x
 
     physics.runEngineForNextFrame(neutral4());
 
-    // After push, P1 hits its right wall (clamp to 184); P3 stays / pushes back
-    expect(p1.x).toBe(216 - 32);
-    expect(p3.x).toBeLessThanOrEqual(216 - 32);
+    // After push, P1 hits its right wall (clamp to leftHalfRightEdge);
+    // P3 stays on its side of the wall.
+    expect(p1.x).toBe(leftHalfRightEdge);
+    expect(p3.x).toBeLessThanOrEqual(leftHalfRightEdge);
   });
 
   it('falling onto teammate stacks on their head and grounds the upper player', () => {

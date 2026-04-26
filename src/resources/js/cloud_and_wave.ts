@@ -17,6 +17,10 @@
  * fade-in entirely, so the AI's RNG trajectory at round-frame 0 ends up
  * thousands of calls ahead of what was recorded. Cloud/wave is purely
  * cosmetic, so independent rng is the cheapest fix.
+ *
+ * `groundWidth` is parameterized so 2v2's wider (576 px) court spreads
+ * clouds across the full sky and lays a wider ribbon of wave tiles. 1v1
+ * keeps the original 432 px world.
  */
 function visualRand(): number {
   return Math.floor(32_768 * Math.random());
@@ -30,9 +34,12 @@ export class Cloud {
   topLeftPointY: number;
   topLeftPointXVelocity: number;
   sizeDiffTurnNumber: number;
+  /** World width this cloud lives in. Used at respawn to wrap correctly. */
+  groundWidth: number;
 
-  constructor() {
-    this.topLeftPointX = -68 + (visualRand() % (432 + 68));
+  constructor(groundWidth: number = 432) {
+    this.groundWidth = groundWidth;
+    this.topLeftPointX = -68 + (visualRand() % (groundWidth + 68));
     this.topLeftPointY = visualRand() % 152;
     this.topLeftPointXVelocity = 1 + (visualRand() % 2);
     this.sizeDiffTurnNumber = visualRand() % 11;
@@ -68,8 +75,9 @@ export class Wave {
   verticalCoordVelocity = 2;
   yCoords: number[] = [];
 
-  constructor() {
-    for (let i = 0; i < 432 / 16; i++) {
+  constructor(groundWidth: number = 432) {
+    const tileCount = (groundWidth / 16) | 0;
+    for (let i = 0; i < tileCount; i++) {
       this.yCoords.push(314);
     }
   }
@@ -84,7 +92,7 @@ export function cloudAndWaveEngine(cloudArray: Cloud[], wave: Wave): void {
     const cloud = cloudArray[i];
     if (cloud === undefined) continue;
     cloud.topLeftPointX += cloud.topLeftPointXVelocity;
-    if (cloud.topLeftPointX > 432) {
+    if (cloud.topLeftPointX > cloud.groundWidth) {
       cloud.topLeftPointX = -68;
       cloud.topLeftPointY = visualRand() % 152;
       cloud.topLeftPointXVelocity = 1 + (visualRand() % 2);
@@ -101,7 +109,7 @@ export function cloudAndWaveEngine(cloudArray: Cloud[], wave: Wave): void {
     wave.verticalCoord = -(visualRand() % 40);
   }
 
-  for (let i = 0; i < 432 / 16; i++) {
+  for (let i = 0; i < wave.yCoords.length; i++) {
     wave.yCoords[i] = 314 - wave.verticalCoord + (visualRand() % 3);
   }
 }

@@ -5,10 +5,11 @@
  * The codes gained by reverse engineering are commented by the address of the function referred to in the machine code.
  * ex) FUN_00405d50 means the function at the address 00405d50 in the machine code.
  */
-import { AnimatedSprite, Container, Sprite, Spritesheet, Texture } from 'pixi.js';
+import { AnimatedSprite, Container, Sprite, Spritesheet, Text, Texture } from 'pixi.js';
 import { Cloud, Wave, cloudAndWaveEngine } from './cloud_and_wave.js';
 import { ASSETS_PATH } from './assets_path.js';
 import type { PikaPhysics } from './physics.js';
+import { t as translate } from './i18n/index.js';
 
 const TEXTURES = ASSETS_PATH.TEXTURES;
 
@@ -37,12 +38,13 @@ export class IntroView {
   /**
    * Create an IntroView object
    * @param sheet loaded spritesheet
+   * @param viewWidth canvas width (1v1 = 432, 2v2 = 576). Centers the mark.
    */
-  constructor(sheet: Spritesheet) {
+  constructor(sheet: Spritesheet, viewWidth: number = 432) {
     const textures = getSheetTextures(sheet);
 
     this.mark = makeSpriteWithAnchorXY(textures, TEXTURES.MARK, 0.5, 0.5);
-    this.mark.x = 432 / 2;
+    this.mark.x = viewWidth / 2;
     this.mark.y = 304 / 2;
 
     this.container = new Container();
@@ -80,6 +82,23 @@ interface MenuMessages {
   withWho: [Sprite, Sprite];
   sachisoft: Sprite;
   fight: Sprite;
+  /**
+   * In-game mode picker: "1 vs 1" / "2 vs 2". Pulls strings from i18n
+   * (`options.mode_1v1` / `options.mode_2v2`) so localization just works
+   * without adding new spritesheet entries. Positioned above the slot list;
+   * selected one pulses bigger via {@link MenuView.drawModeMessages}.
+   */
+  mode: [Text, Text];
+  /**
+   * Per-slot human/CPU picker rendered as Pixi Text rows. `slot[i]` is the
+   * "P1" / "P2" / "P3" / "P4" label; `slotState[i]` is the toggleable "HUMAN"
+   * / "CPU" indicator. `start` is the bottom row that launches the game.
+   * `cursor` is the "▶" arrow that highlights the active row.
+   */
+  slot: [Text, Text, Text, Text];
+  slotState: [Text, Text, Text, Text];
+  start: Text;
+  cursor: Text;
 }
 
 /**
@@ -90,9 +109,20 @@ export class MenuView {
   sittingPikachuTilesContainer: Container;
   container: Container;
   sittingPikachuTilesDisplacement = 0;
-  /** 0: with computer, 1: with friend, -1: not selected */
+  /** 0: with computer, 1: with friend, -1: not selected. Legacy — withWho
+   *  sprites stay loaded from the atlas but are no longer drawn; the slot
+   *  picker replaced them. */
   selectedWithWho = -1;
   selectedWithWhoMessageSizeIncrement = 2;
+  /** 0: 1v1, 1: 2v2, -1: not selected */
+  selectedMode = -1;
+  selectedModeMessageSizeIncrement = 2;
+  /**
+   * 0..N-1 highlights a player slot, N highlights the START row. Where
+   * N = 2 (1v1) or 4 (2v2) — the controller passes playerCount each draw.
+   * -1 means not selected (frame 0 init).
+   */
+  selectedSlot = -1;
 
   /**
    * Create a MenuView object
@@ -110,6 +140,11 @@ export class MenuView {
       ],
       sachisoft: makeSpriteWithAnchorXY(textures, TEXTURES.SACHISOFT, 0, 0),
       fight: makeSpriteWithAnchorXY(textures, TEXTURES.FIGHT, 0, 0),
+      mode: makeModeLabels(),
+      slot: makeSlotLabels(),
+      slotState: makeSlotStateLabels(),
+      start: makeMenuText(translate('menu.start'), MENU_LIST_FONT_SIZE + 2),
+      cursor: makeMenuText('▶', MENU_LIST_FONT_SIZE),
     };
     this.sittingPikachuTilesContainer = makeSittingPikachuTilesContainer(textures);
 
@@ -127,8 +162,12 @@ export class MenuView {
     this.container.addChild(this.sittingPikachuTilesContainer);
     this.container.addChild(this.messages.pokemon);
     this.container.addChild(this.messages.pikachuVolleyball);
-    this.container.addChild(this.messages.withWho[0]);
-    this.container.addChild(this.messages.withWho[1]);
+    this.container.addChild(this.messages.mode[0]);
+    this.container.addChild(this.messages.mode[1]);
+    for (const t of this.messages.slot) this.container.addChild(t);
+    for (const t of this.messages.slotState) this.container.addChild(t);
+    this.container.addChild(this.messages.start);
+    this.container.addChild(this.messages.cursor);
     this.container.addChild(this.messages.sachisoft);
     this.container.addChild(this.messages.fight);
     this.initializeVisibles();
@@ -154,6 +193,12 @@ export class MenuView {
     this.messages.withWho[1].visible = false;
     this.messages.sachisoft.visible = false;
     this.messages.fight.visible = false;
+    this.messages.mode[0].visible = false;
+    this.messages.mode[1].visible = false;
+    for (const t of this.messages.slot) t.visible = false;
+    for (const t of this.messages.slotState) t.visible = false;
+    this.messages.start.visible = false;
+    this.messages.cursor.visible = false;
   }
 
   /**
@@ -319,6 +364,172 @@ export class MenuView {
     this.selectedWithWho = i;
     this.selectedWithWhoMessageSizeIncrement = 2;
   }
+
+  /**
+   * Mirror of {@link drawWithWhoMessages}: paints the two mode labels above
+   * the withWho sprites and pulses the selected one. Called every menu tick.
+   */
+  drawModeMessages(frameCounter: number): void {
+    const labels = this.messages.mode;
+    if (frameCounter === 0) {
+      labels[0].visible = false;
+      labels[1].visible = false;
+      return;
+    }
+
+    if (frameCounter > 70) {
+      if (this.selectedModeMessageSizeIncrement < 10) {
+        this.selectedModeMessageSizeIncrement += 1;
+      }
+      const baseSize = MODE_LABEL_BASE_FONT_SIZE;
+      const totalWidth = labels[0].width + labels[1].width + MODE_LABEL_GAP;
+      let cursorX = 216 - totalWidth / 2;
+      labels.forEach((label, i) => {
+        const selected = Number(this.selectedMode === i);
+        label.visible = true;
+        label.style.fontSize = baseSize + selected * this.selectedModeMessageSizeIncrement;
+        label.x = cursorX;
+        label.y = MODE_LABEL_Y - selected * (this.selectedModeMessageSizeIncrement / 2);
+        cursorX += label.width + MODE_LABEL_GAP;
+      });
+    }
+  }
+
+  /**
+   * Pulse-resets the selection size animation when the highlighted mode changes.
+   * @param i 0: 1v1, 1: 2v2
+   */
+  selectMode(i: number): void {
+    this.selectedMode = i;
+    this.selectedModeMessageSizeIncrement = 2;
+  }
+
+  /** Re-applies current i18n strings to the mode labels (call on locale change). */
+  refreshModeLabels(): void {
+    this.messages.mode[0].text = translate('options.mode_1v1');
+    this.messages.mode[1].text = translate('options.mode_2v2');
+    this.messages.start.text = translate('menu.start');
+  }
+
+  /**
+   * Cursor highlight for the slot picker. -1 means "not selected" (frame 0
+   * init). 0..playerCount-1 lands on a player slot (toggled by power-hit).
+   * playerCount lands on the START row (power-hit launches the game).
+   */
+  selectSlot(i: number): void {
+    this.selectedSlot = i;
+  }
+
+  /**
+   * Draw the per-slot human/CPU picker plus the START row. `playerCount`
+   * is 2 (1v1: only P1/P2 visible) or 4 (2v2: all four slots visible).
+   * `slotIsHuman` carries the current toggle state for ALL four slots,
+   * even in 1v1, so 2v2's settings persist if the user flips back.
+   */
+  drawSlotList(
+    frameCounter: number,
+    playerCount: 2 | 4,
+    slotIsHuman: ReadonlyArray<boolean>,
+  ): void {
+    if (frameCounter === 0) {
+      for (const t of this.messages.slot) t.visible = false;
+      for (const t of this.messages.slotState) t.visible = false;
+      this.messages.start.visible = false;
+      this.messages.cursor.visible = false;
+      return;
+    }
+    if (frameCounter <= 71) return;
+
+    const labels = this.messages.slot;
+    const states = this.messages.slotState;
+    for (let i = 0; i < 4; i++) {
+      const visible = i < playerCount;
+      const labelText = labels[i];
+      const stateText = states[i];
+      if (labelText !== undefined) labelText.visible = visible;
+      if (stateText !== undefined) {
+        stateText.visible = visible;
+        const isHuman = slotIsHuman[i] === true;
+        stateText.text = isHuman ? translate('menu.slot_human') : translate('menu.slot_cpu');
+        stateText.style.fill = isHuman ? 0xff_e0_60 : 0xff_ff_ff;
+      }
+      const rowY = SLOT_LIST_BASE_Y + i * SLOT_LIST_ROW_HEIGHT;
+      if (labelText !== undefined) {
+        labelText.x = SLOT_LIST_LABEL_X;
+        labelText.y = rowY;
+      }
+      if (stateText !== undefined) {
+        stateText.x = SLOT_LIST_STATE_X;
+        stateText.y = rowY;
+      }
+    }
+
+    this.messages.start.visible = true;
+    const startY = SLOT_LIST_BASE_Y + playerCount * SLOT_LIST_ROW_HEIGHT + START_ROW_GAP;
+    this.messages.start.x = 216 - this.messages.start.width / 2;
+    this.messages.start.y = startY;
+
+    // Cursor: hidden if -1, else position at left of the highlighted row.
+    const cursor = this.messages.cursor;
+    const cursorIdx = this.selectedSlot;
+    if (cursorIdx < 0) {
+      cursor.visible = false;
+    } else {
+      cursor.visible = true;
+      cursor.x = SLOT_LIST_CURSOR_X;
+      cursor.y =
+        cursorIdx === playerCount ? startY : SLOT_LIST_BASE_Y + cursorIdx * SLOT_LIST_ROW_HEIGHT;
+    }
+  }
+}
+
+const MODE_LABEL_Y = 130;
+const MODE_LABEL_GAP = 24;
+const MODE_LABEL_BASE_FONT_SIZE = 16;
+const MENU_LIST_FONT_SIZE = 14;
+const SLOT_LIST_BASE_Y = 158;
+const SLOT_LIST_ROW_HEIGHT = 18;
+const SLOT_LIST_CURSOR_X = 158;
+const SLOT_LIST_LABEL_X = 178;
+const SLOT_LIST_STATE_X = 232;
+const START_ROW_GAP = 6;
+
+function makeModeLabels(): [Text, Text] {
+  return [
+    makeMenuText(translate('options.mode_1v1'), MODE_LABEL_BASE_FONT_SIZE),
+    makeMenuText(translate('options.mode_2v2'), MODE_LABEL_BASE_FONT_SIZE),
+  ];
+}
+
+function makeSlotLabels(): [Text, Text, Text, Text] {
+  return [
+    makeMenuText('P1', MENU_LIST_FONT_SIZE),
+    makeMenuText('P2', MENU_LIST_FONT_SIZE),
+    makeMenuText('P3', MENU_LIST_FONT_SIZE),
+    makeMenuText('P4', MENU_LIST_FONT_SIZE),
+  ];
+}
+
+function makeSlotStateLabels(): [Text, Text, Text, Text] {
+  return [
+    makeMenuText(translate('menu.slot_cpu'), MENU_LIST_FONT_SIZE),
+    makeMenuText(translate('menu.slot_cpu'), MENU_LIST_FONT_SIZE),
+    makeMenuText(translate('menu.slot_cpu'), MENU_LIST_FONT_SIZE),
+    makeMenuText(translate('menu.slot_cpu'), MENU_LIST_FONT_SIZE),
+  ];
+}
+
+function makeMenuText(text: string, fontSize: number): Text {
+  return new Text({
+    text,
+    style: {
+      fontFamily: 'DotGothic16, "JetBrains Mono", sans-serif',
+      fontSize,
+      fill: 0xff_ff_ff,
+      stroke: { color: 0x00_00_00, width: 3 },
+      align: 'center',
+    },
+  });
 }
 
 interface GameViewMessages {
@@ -348,6 +559,12 @@ interface ScoreBoardChildren {
  * Class represent a game view where pikachus, ball, clouds, waves, and backgrounds are
  */
 export class GameView {
+  /**
+   * Active world width passed in by the controller (1v1 = 432, 2v2 = 576).
+   * Used to size the background tiling, wave / cloud span, fade overlay,
+   * scoreboard right-edge, and the net pillar's centerline.
+   */
+  groundWidth: number;
   bgContainer: Container;
   /**
    * One sprite per player slot, indexed by physics player slot. Length 2
@@ -375,11 +592,12 @@ export class GameView {
   cloudArray: Cloud[];
   wave: Wave;
 
-  constructor(sheet: Spritesheet, playerCount: 2 | 4 = 2) {
+  constructor(sheet: Spritesheet, playerCount: 2 | 4 = 2, groundWidth: number = 432) {
     const textures = getSheetTextures(sheet);
+    this.groundWidth = groundWidth;
 
     // Display objects below
-    this.bgContainer = makeBGContainer(textures);
+    this.bgContainer = makeBGContainer(textures, groundWidth);
     this.playerSprites = makePlayerAnimatedSprites(textures, playerCount);
     for (let i = 0; i < this.playerSprites.length; i++) {
       const sprite = this.playerSprites[i];
@@ -425,7 +643,7 @@ export class GameView {
     const cloud = makeCloudContainer(textures);
     this.cloudContainer = cloud.container;
     this.cloudSprites = cloud.sprites;
-    const wave = makeWaveContainer(textures);
+    const wave = makeWaveContainer(textures, groundWidth);
     this.waveContainer = wave.container;
     this.waveSprites = wave.sprites;
 
@@ -457,11 +675,14 @@ export class GameView {
     this.waveContainer.x = 0;
     this.waveContainer.y = 0;
 
-    this.messages.ready.x = 176;
+    // The "ready" sprite was originally at x=176 in the 432-wide world
+    // (≈ groundHalfWidth − 40, so its 80-px-wide texture sits centered).
+    // Re-center it on the active groundWidth so 2v2 lines it up too.
+    this.messages.ready.x = (groundWidth >> 1) - this.messages.ready.texture.width / 2;
     this.messages.ready.y = 38;
     this.scoreBoards[0].x = 14; // score board is 14 pixel distant from boundary
     this.scoreBoards[0].y = 10;
-    this.scoreBoards[1].x = 432 - 32 - 32 - 14; // 32 pixel is for number (32x32px) width; one score board has two numbers
+    this.scoreBoards[1].x = groundWidth - 32 - 32 - 14; // 32 pixel is for number (32x32px) width; one score board has two numbers
     this.scoreBoards[1].y = 10;
 
     for (const shadow of this.shadows.forPlayers) shadow.y = 273;
@@ -474,9 +695,9 @@ export class GameView {
     // since it is not dependent on user input, and only used for rendering.
     this.cloudArray = [];
     for (let i = 0; i < NUM_OF_CLOUDS; i++) {
-      this.cloudArray.push(new Cloud());
+      this.cloudArray.push(new Cloud(groundWidth));
     }
-    this.wave = new Wave();
+    this.wave = new Wave(groundWidth);
   }
 
   get visible(): boolean {
@@ -592,7 +813,7 @@ export class GameView {
       cloudSprite.height = cloud.spriteHeight;
     }
 
-    for (let i = 0; i < 432 / 16; i++) {
+    for (let i = 0; i < this.waveSprites.length; i++) {
       const waveSprite = this.waveSprites[i];
       const yCoord = wave.yCoords[i];
       if (waveSprite === undefined || yCoord === undefined) continue;
@@ -620,7 +841,7 @@ export class GameView {
     const h = gameStartMessage.texture.height; // game start message texture height
     const halfWidth = Math.floor((w * frameCounter) / 50);
     const halfHeight = Math.floor((h * frameCounter) / 50);
-    gameStartMessage.x = 216 - halfWidth;
+    gameStartMessage.x = (this.groundWidth >> 1) - halfWidth;
     gameStartMessage.y = 50 + 2 * halfHeight;
     gameStartMessage.width = 2 * halfWidth;
     gameStartMessage.height = 2 * halfHeight;
@@ -654,16 +875,17 @@ export class GameView {
     if (frameCounter === 0) {
       gameEndMessage.visible = true;
     }
+    const cx = this.groundWidth >> 1;
     if (frameCounter < 50) {
       const halfWidthIncrement = 2 * Math.floor(((50 - frameCounter) * w) / 50);
       const halfHeightIncrement = 2 * Math.floor(((50 - frameCounter) * h) / 50);
 
-      gameEndMessage.x = 216 - w / 2 - halfWidthIncrement;
+      gameEndMessage.x = cx - w / 2 - halfWidthIncrement;
       gameEndMessage.y = 50 - halfHeightIncrement;
       gameEndMessage.width = w + 2 * halfWidthIncrement;
       gameEndMessage.height = h + 2 * halfHeightIncrement;
     } else {
-      gameEndMessage.x = 216 - w / 2;
+      gameEndMessage.x = cx - w / 2;
       gameEndMessage.y = 50;
       gameEndMessage.width = w;
       gameEndMessage.height = h;
@@ -677,14 +899,19 @@ export class GameView {
 export class FadeInOut {
   black: Sprite;
 
-  constructor(sheet: Spritesheet) {
+  constructor(sheet: Spritesheet, viewWidth: number = 432) {
     const textures = getSheetTextures(sheet);
     this.black = makeSpriteWithAnchorXY(textures, TEXTURES.BLACK, 0, 0);
-    this.black.width = 432;
+    this.black.width = viewWidth;
     this.black.height = 304;
     this.black.x = 0;
     this.black.y = 0;
     this.black.alpha = 1;
+  }
+
+  /** Re-cover the canvas after a mode change (canvas widened/narrowed). */
+  resize(viewWidth: number): void {
+    this.black.width = viewWidth;
   }
 
   get visible(): boolean {
@@ -727,7 +954,10 @@ export class FadeInOut {
 }
 
 /**
- * Make sitting pikachu tiles
+ * Make sitting pikachu tiles. Tile count is computed from canvas dimensions
+ * so the menu background fills the full visible area regardless of mode
+ * (1v1 = 432, 2v2 = 576). The +2 padding lets the displacement-scroll loop
+ * keep tiles flush to the right and bottom edges as the container slides.
  */
 function makeSittingPikachuTilesContainer(textures: TextureDict): Container {
   const container = new Container();
@@ -746,46 +976,58 @@ function makeSittingPikachuTilesContainer(textures: TextureDict): Container {
 }
 
 /**
- * Make background
+ * Make background. `groundWidth` controls the tile counts (sky, ground_red,
+ * ground_line, ground_yellow) and the right-edge cap, plus the net pillar's
+ * centerline (originally 213 = 216 - 3 in the 432-wide world).
  */
-function makeBGContainer(textures: TextureDict): Container {
+function makeBGContainer(textures: TextureDict, groundWidth: number = 432): Container {
   const bgContainer = new Container();
+  const tileCols = (groundWidth / 16) | 0;
+  const halfWidth = (groundWidth / 2) | 0;
+  const netPillarX = halfWidth - 3;
 
   // sky
   let texture = getTexture(textures, TEXTURES.SKY_BLUE);
   for (let j = 0; j < 12; j++) {
-    for (let i = 0; i < 432 / 16; i++) {
+    for (let i = 0; i < tileCols; i++) {
       const tile = new Sprite(texture);
       addChildToParentAndSetLocalPosition(bgContainer, tile, 16 * i, 16 * j);
     }
   }
 
-  // mountain
+  // mountain. Single 432-wide sprite by default; for the wider 2v2 court we
+  // stretch it horizontally to span the full groundWidth so there's no black
+  // band between the rightmost edge of the original mountain texture and the
+  // canvas edge. Vertical scale stays native — only x is stretched.
   texture = getTexture(textures, TEXTURES.MOUNTAIN);
-  addChildToParentAndSetLocalPosition(bgContainer, new Sprite(texture), 0, 188);
+  const mountain = new Sprite(texture);
+  mountain.x = 0;
+  mountain.y = 188;
+  mountain.width = groundWidth;
+  bgContainer.addChild(mountain);
 
   // ground_red
   texture = getTexture(textures, TEXTURES.GROUND_RED);
-  for (let i = 0; i < 432 / 16; i++) {
+  for (let i = 0; i < tileCols; i++) {
     const tile = new Sprite(texture);
     addChildToParentAndSetLocalPosition(bgContainer, tile, 16 * i, 248);
   }
 
   // ground_line
   texture = getTexture(textures, TEXTURES.GROUND_LINE);
-  for (let i = 1; i < 432 / 16 - 1; i++) {
+  for (let i = 1; i < tileCols - 1; i++) {
     const tile = new Sprite(texture);
     addChildToParentAndSetLocalPosition(bgContainer, tile, 16 * i, 264);
   }
   texture = getTexture(textures, TEXTURES.GROUND_LINE_LEFT_MOST);
   addChildToParentAndSetLocalPosition(bgContainer, new Sprite(texture), 0, 264);
   texture = getTexture(textures, TEXTURES.GROUND_LINE_RIGHT_MOST);
-  addChildToParentAndSetLocalPosition(bgContainer, new Sprite(texture), 432 - 16, 264);
+  addChildToParentAndSetLocalPosition(bgContainer, new Sprite(texture), groundWidth - 16, 264);
 
   // ground_yellow
   texture = getTexture(textures, TEXTURES.GROUND_YELLOW);
   for (let j = 0; j < 2; j++) {
-    for (let i = 0; i < 432 / 16; i++) {
+    for (let i = 0; i < tileCols; i++) {
       const tile = new Sprite(texture);
       addChildToParentAndSetLocalPosition(bgContainer, tile, 16 * i, 280 + 16 * j);
     }
@@ -793,11 +1035,11 @@ function makeBGContainer(textures: TextureDict): Container {
 
   // net pillar
   texture = getTexture(textures, TEXTURES.NET_PILLAR_TOP);
-  addChildToParentAndSetLocalPosition(bgContainer, new Sprite(texture), 213, 176);
+  addChildToParentAndSetLocalPosition(bgContainer, new Sprite(texture), netPillarX, 176);
   texture = getTexture(textures, TEXTURES.NET_PILLAR);
   for (let j = 0; j < 12; j++) {
     const tile = new Sprite(texture);
-    addChildToParentAndSetLocalPosition(bgContainer, tile, 213, 184 + 8 * j);
+    addChildToParentAndSetLocalPosition(bgContainer, tile, netPillarX, 184 + 8 * j);
   }
 
   return bgContainer;
@@ -925,13 +1167,15 @@ function makeCloudContainer(textures: TextureDict): CloudOrWaveContainer {
 }
 
 /**
- * Make a container with wave sprites
+ * Make a container with wave sprites. `groundWidth` controls how many 16-px
+ * wave tiles are laid down, matching the {@link Wave.yCoords} array length.
  */
-function makeWaveContainer(textures: TextureDict): CloudOrWaveContainer {
+function makeWaveContainer(textures: TextureDict, groundWidth: number = 432): CloudOrWaveContainer {
   const container = new Container();
   const texture = getTexture(textures, TEXTURES.WAVE);
   const sprites: Sprite[] = [];
-  for (let i = 0; i < 432 / 16; i++) {
+  const tileCount = (groundWidth / 16) | 0;
+  for (let i = 0; i < tileCount; i++) {
     const tile = new Sprite(texture);
     addChildToParentAndSetLocalPosition(container, tile, 16 * i, 0);
     sprites.push(tile);

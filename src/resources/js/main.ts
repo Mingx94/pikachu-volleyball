@@ -124,6 +124,17 @@ async function loadAndStart(progressBar: HTMLElement, loadingBox: HTMLElement): 
   }
 
   const pikaVolley = new PikachuVolleyball(app.stage, sheet, sounds);
+  // Wire the renderer-resize callback so PikachuVolleyball can grow / shrink
+  // the canvas to match each mode's `groundWidth` (1v1 = 432, 2v2 = 576).
+  // Also flips the CSS variable so the wrapper preserves the right aspect
+  // ratio when scaling to the page viewport.
+  pikaVolley.setRendererResizer((w, h) => {
+    app.renderer.resize(w, h);
+    // Set on :root so the layout-wide var consumers (canvas wrapper, notice
+    // boxes, btn-width math) all see the new ratio.
+    document.documentElement.style.setProperty('--aspect-ratio', `${w} / ${h}`);
+    document.documentElement.style.setProperty('--inverse-aspect-ratio', `${h} / ${w}`);
+  });
   setUpUI(pikaVolley, app.ticker);
 
   // Decouple simulation rate from render rate. The Pixi ticker fires at the

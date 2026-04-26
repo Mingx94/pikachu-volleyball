@@ -19,8 +19,6 @@ import type { Ball, PikaUserInput, Player } from './physics.js';
 import {
   BALL_RADIUS,
   BALL_TOUCHING_GROUND_Y_COORD,
-  GROUND_HALF_WIDTH,
-  GROUND_WIDTH,
   INFINITE_LOOP_LIMIT,
   NET_PILLAR_HALF_WIDTH,
   NET_PILLAR_TOP_TOP_Y_COORD,
@@ -54,15 +52,15 @@ export function letComputerDecideUserInput(
 
   let virtualExpectedLandingPointX = ball.expectedLandingPointX;
   if (Math.abs(ball.x - player.x) > 100 && Math.abs(ball.xVelocity) < player.computerBoldness + 5) {
-    const leftBoundary = Number(player.isPlayer2) * GROUND_HALF_WIDTH;
+    const leftBoundary = Number(player.isPlayer2) * player.groundHalfWidth;
     if (
       (ball.expectedLandingPointX <= leftBoundary ||
         ball.expectedLandingPointX >=
-          Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
+          Number(player.isPlayer2) * player.groundWidth + player.groundHalfWidth) &&
       player.computerWhereToStandBy === 0
     ) {
       // If conditions above met, the computer estimates the proper location to stay as the middle point of their side
-      virtualExpectedLandingPointX = leftBoundary + ((GROUND_HALF_WIDTH / 2) | 0);
+      virtualExpectedLandingPointX = leftBoundary + ((player.groundHalfWidth / 2) | 0);
     }
   }
 
@@ -87,8 +85,8 @@ export function letComputerDecideUserInput(
       userInput.yDirection = -1;
     }
 
-    const leftBoundary = Number(player.isPlayer2) * GROUND_HALF_WIDTH;
-    const rightBoundary = (Number(player.isPlayer2) + 1) * GROUND_HALF_WIDTH;
+    const leftBoundary = Number(player.isPlayer2) * player.groundHalfWidth;
+    const rightBoundary = (Number(player.isPlayer2) + 1) * player.groundHalfWidth;
     if (
       ball.expectedLandingPointX > leftBoundary &&
       ball.expectedLandingPointX < rightBoundary &&
@@ -148,8 +146,9 @@ function decideWhetherInputPowerHit(
           ball,
         );
         if (
-          (expectedLandingPointX <= Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
-            expectedLandingPointX >= Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
+          (expectedLandingPointX <= Number(player.isPlayer2) * player.groundHalfWidth ||
+            expectedLandingPointX >=
+              Number(player.isPlayer2) * player.groundWidth + player.groundHalfWidth) &&
           Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH
         ) {
           userInput.xDirection = xDirection;
@@ -167,8 +166,9 @@ function decideWhetherInputPowerHit(
           ball,
         );
         if (
-          (expectedLandingPointX <= Number(player.isPlayer2) * GROUND_HALF_WIDTH ||
-            expectedLandingPointX >= Number(player.isPlayer2) * GROUND_WIDTH + GROUND_HALF_WIDTH) &&
+          (expectedLandingPointX <= Number(player.isPlayer2) * player.groundHalfWidth ||
+            expectedLandingPointX >=
+              Number(player.isPlayer2) * player.groundWidth + player.groundHalfWidth) &&
           Math.abs(expectedLandingPointX - theOtherPlayer.x) > PLAYER_LENGTH
         ) {
           userInput.xDirection = xDirection;
@@ -200,7 +200,7 @@ function expectedLandingPointXWhenPowerHit(
     xVelocity: ball.xVelocity,
     yVelocity: ball.yVelocity,
   };
-  if (copyBall.x < GROUND_HALF_WIDTH) {
+  if (copyBall.x < ball.groundHalfWidth) {
     copyBall.xVelocity = (Math.abs(userInputXDirection) + 1) * 10;
   } else {
     copyBall.xVelocity = -(Math.abs(userInputXDirection) + 1) * 10;
@@ -212,14 +212,14 @@ function expectedLandingPointXWhenPowerHit(
     loopCounter++;
 
     const futureCopyBallX = copyBall.x + copyBall.xVelocity;
-    if (futureCopyBallX < BALL_RADIUS || futureCopyBallX > GROUND_WIDTH) {
+    if (futureCopyBallX < BALL_RADIUS || futureCopyBallX > ball.groundWidth) {
       copyBall.xVelocity = -copyBall.xVelocity;
     }
     if (copyBall.y + copyBall.yVelocity < 0) {
       copyBall.yVelocity = 1;
     }
     if (
-      Math.abs(copyBall.x - GROUND_HALF_WIDTH) < NET_PILLAR_HALF_WIDTH &&
+      Math.abs(copyBall.x - ball.groundHalfWidth) < NET_PILLAR_HALF_WIDTH &&
       copyBall.y > NET_PILLAR_TOP_TOP_Y_COORD
     ) {
       /*
