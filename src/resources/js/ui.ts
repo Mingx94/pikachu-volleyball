@@ -13,6 +13,7 @@ export interface Options {
   sfx?: string | null;
   speed?: string | null;
   winningScore?: string | null;
+  mode?: string | null;
 }
 
 /**
@@ -133,6 +134,14 @@ export function setUpUI(pikaVolley: PikachuVolleyball, ticker: Ticker): void {
         pikaVolley.winningScore = 15;
         break;
     }
+    switch (options.mode) {
+      case '1v1':
+        pikaVolley.setMode('1v1');
+        break;
+      case '2v2':
+        pikaVolley.setMode('2v2');
+        break;
+    }
   };
 
   const saveOptions = (options: Options): void => {
@@ -152,6 +161,9 @@ export function setUpUI(pikaVolley: PikachuVolleyball, ticker: Ticker): void {
     if (options.winningScore) {
       localStorageWrapper.set('pv-offline-winningScore', options.winningScore);
     }
+    if (options.mode) {
+      localStorageWrapper.set('pv-offline-mode', options.mode);
+    }
   };
 
   const loadOptions = (): Options => ({
@@ -160,6 +172,7 @@ export function setUpUI(pikaVolley: PikachuVolleyball, ticker: Ticker): void {
     sfx: localStorageWrapper.get('pv-offline-sfx'),
     speed: localStorageWrapper.get('pv-offline-speed'),
     winningScore: localStorageWrapper.get('pv-offline-winningScore'),
+    mode: localStorageWrapper.get('pv-offline-mode'),
   });
 
   const applyAndSaveOptions = (options: Options): void => {
@@ -487,6 +500,17 @@ function setUpBtns(
     pikaVolley.isPracticeMode = false;
   });
 
+  const mode1v1Btn = el('mode-1v1-btn');
+  const mode2v2Btn = el('mode-2v2-btn');
+  mode1v1Btn.addEventListener('click', () => {
+    if (mode1v1Btn.classList.contains('selected')) return;
+    applyAndSaveOptions({ mode: '1v1' });
+  });
+  mode2v2Btn.addEventListener('click', () => {
+    if (mode2v2Btn.classList.contains('selected')) return;
+    applyAndSaveOptions({ mode: '2v2' });
+  });
+
   const aboutBox = el('about-box');
   const closeAboutBtn = el('close-about-btn');
   aboutBtn.addEventListener('click', () => {
@@ -626,6 +650,17 @@ function setSelectedOptionsBtn(options: Options): void {
         break;
     }
   }
+  if (options.mode) {
+    const mode1v1Btn = el('mode-1v1-btn');
+    const mode2v2Btn = el('mode-2v2-btn');
+    if (options.mode === '2v2') {
+      mode1v1Btn.classList.remove('selected');
+      mode2v2Btn.classList.add('selected');
+    } else {
+      mode2v2Btn.classList.remove('selected');
+      mode1v1Btn.classList.add('selected');
+    }
+  }
 }
 
 /**
@@ -669,6 +704,9 @@ function setUpToShowDropdownsAndSubmenus(pikaVolley: PikachuVolleyball): void {
   el('practice-mode-submenu-btn').addEventListener('mouseover', () => {
     showSubmenu('practice-mode-submenu-btn', 'practice-mode-submenu');
   });
+  el('mode-submenu-btn').addEventListener('mouseover', () => {
+    showSubmenu('mode-submenu-btn', 'mode-submenu');
+  });
   el('reset-to-default-btn').addEventListener('mouseover', () => {
     hideSubmenus();
   });
@@ -689,6 +727,9 @@ function setUpToShowDropdownsAndSubmenus(pikaVolley: PikachuVolleyball): void {
   });
   el('practice-mode-submenu-btn').addEventListener('click', () => {
     showSubmenu('practice-mode-submenu-btn', 'practice-mode-submenu');
+  });
+  el('mode-submenu-btn').addEventListener('click', () => {
+    showSubmenu('mode-submenu-btn', 'mode-submenu');
   });
   el('reset-to-default-btn').addEventListener('click', () => {
     hideSubmenus();

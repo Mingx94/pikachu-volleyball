@@ -7,6 +7,7 @@ import {
   deserializeReplay,
   mulberry32,
   type Replay,
+  type ReplayInputFrame,
   type SerializedInput,
   runReplay,
   runReplayStreaming,
@@ -103,7 +104,7 @@ describe('controller-pattern recording', () => {
 
     // PikaUserInput stand-ins for the controller's keyboardArray
     const live: [PikaUserInput, PikaUserInput] = [new PikaUserInput(), new PikaUserInput()];
-    const recordingFrames: Array<readonly [SerializedInput, SerializedInput]> = [];
+    const recordingFrames: ReplayInputFrame[] = [];
 
     for (let i = 0; i < 80; i++) {
       const { x, y, hit } = player1Script(i);
@@ -348,7 +349,7 @@ describe('cloud/wave RNG isolation', () => {
     // Simulate startOfNewGame's 71 cloud/wave ticks
     for (let i = 0; i < 71; i++) cloudAndWaveEngine(clouds, wave);
 
-    const recFrames: Array<readonly [SerializedInput, SerializedInput]> = [];
+    const recFrames: ReplayInputFrame[] = [];
     const live: [PikaUserInput, PikaUserInput] = [new PikaUserInput(), new PikaUserInput()];
     for (let i = 0; i < FRAMES; i++) {
       // Player 2 jitters to make the recording have non-trivial input

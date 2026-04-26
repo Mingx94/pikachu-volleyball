@@ -43,12 +43,38 @@ export interface RoundReInit {
   isPlayer2Serve: boolean;
 }
 
+/**
+ * One frame's worth of input. 2 inputs for 1v1 (the original schema), 4
+ * inputs for 2v2. Modeled as a union of two tuple types so destructuring
+ * (`for (const [a, b] of frames)`) keeps narrowing under
+ * `noUncheckedIndexedAccess`.
+ */
+export type ReplayInputFrame =
+  | readonly [SerializedInput, SerializedInput]
+  | readonly [SerializedInput, SerializedInput, SerializedInput, SerializedInput];
+
 export interface Replay {
   version: 1;
   seed: number;
   isPlayer1Computer: boolean;
   isPlayer2Computer: boolean;
-  frames: ReadonlyArray<readonly [SerializedInput, SerializedInput]>;
+  /**
+   * 2v2-only AI flag for the left team's second player. Optional; defaults
+   * to `true` (CPU). Old 1v1 replays don't carry this field.
+   */
+  isPlayer3Computer?: boolean;
+  /**
+   * 2v2-only AI flag for the right team's second player. Optional; defaults
+   * to `true` (CPU). Old 1v1 replays don't carry this field.
+   */
+  isPlayer4Computer?: boolean;
+  /**
+   * Player count: 2 (1v1, the default) or 4 (2v2). Optional — old replays
+   * recorded before 2v2 existed have no such field and are interpreted as
+   * `2`. Each `frames[i]` must have length matching this.
+   */
+  playerCount?: 2 | 4;
+  frames: ReadonlyArray<ReplayInputFrame>;
   /**
    * Optional inter-round reInit markers. Absent or empty for single-round
    * replays. Must be sorted by `atFrame` ascending.
@@ -85,25 +111,36 @@ function inflateInput(s: SerializedInput): PikaUserInput {
   return input;
 }
 
+function serializeInput(i: PikaUserInput): SerializedInput {
+  return {
+    xDirection: i.xDirection as -1 | 0 | 1,
+    yDirection: i.yDirection as -1 | 0 | 1,
+    powerHit: i.powerHit as 0 | 1,
+  };
+}
+
 /**
- * Snapshot the live {@link PikaUserInput} pair into a {@link SerializedInput}
- * pair suitable for storing into a Replay frame.
+ * Snapshot the live {@link PikaUserInput} array into a {@link ReplayInputFrame}
+ * suitable for storing into a Replay. Accepts length-2 (1v1) or length-4
+ * (2v2); other lengths throw — this is a controller-layer invariant, not
+ * user input.
  */
-export function snapshotInputs(
-  inputs: readonly [PikaUserInput, PikaUserInput],
-): readonly [SerializedInput, SerializedInput] {
-  return [
-    {
-      xDirection: inputs[0].xDirection as -1 | 0 | 1,
-      yDirection: inputs[0].yDirection as -1 | 0 | 1,
-      powerHit: inputs[0].powerHit as 0 | 1,
-    },
-    {
-      xDirection: inputs[1].xDirection as -1 | 0 | 1,
-      yDirection: inputs[1].yDirection as -1 | 0 | 1,
-      powerHit: inputs[1].powerHit as 0 | 1,
-    },
-  ];
+export function snapshotInputs(inputs: readonly PikaUserInput[]): ReplayInputFrame {
+  if (inputs.length === 2) {
+    const [a, b] = inputs;
+    if (a === undefined || b === undefined) {
+      throw new Error('unreachable: length 2 with undefined element');
+    }
+    return [serializeInput(a), serializeInput(b)];
+  }
+  if (inputs.length === 4) {
+    const [a, b, c, d] = inputs;
+    if (a === undefined || b === undefined || c === undefined || d === undefined) {
+      throw new Error('unreachable: length 4 with undefined element');
+    }
+    return [serializeInput(a), serializeInput(b), serializeInput(c), serializeInput(d)];
+  }
+  throw new Error(`snapshotInputs: unsupported player count ${inputs.length}`);
 }
 
 /**
@@ -121,21 +158,29 @@ export function snapshotInputs(
  */
 export function* runReplayStreaming(replay: Replay): Generator<PikaPhysics, PikaPhysics, void> {
   setCustomRng(mulberry32(replay.seed));
-  const physics = new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer);
+  const playerCount = replay.playerCount ?? 2;
+  const physics =
+    playerCount === 2
+      ? new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer)
+      : new PikaPhysics([
+          { isPlayer2: false, isComputer: replay.isPlayer1Computer },
+          { isPlayer2: true, isComputer: replay.isPlayer2Computer },
+          { isPlayer2: false, isComputer: replay.isPlayer3Computer ?? true },
+          { isPlayer2: true, isComputer: replay.isPlayer4Computer ?? true },
+        ]);
   const reInits = replay.roundReInits ?? [];
   let reInitIdx = 0;
   for (let i = 0; i < replay.frames.length; i++) {
     while (reInitIdx < reInits.length) {
       const next = reInits[reInitIdx];
       if (next === undefined || next.atFrame !== i) break;
-      physics.player1.initializeForNewRound();
-      physics.player2.initializeForNewRound();
+      for (const player of physics.players) player.initializeForNewRound();
       physics.ball.initializeForNewRound(next.isPlayer2Serve);
       reInitIdx++;
     }
     const frame = replay.frames[i];
     if (frame === undefined) break;
-    physics.runEngineForNextFrame([inflateInput(frame[0]), inflateInput(frame[1])]);
+    physics.runEngineForNextFrame(frame.map(inflateInput));
     yield physics;
   }
   return physics;
@@ -161,7 +206,13 @@ export function buildReplay(args: {
   seed: number;
   isPlayer1Computer: boolean;
   isPlayer2Computer: boolean;
-  frames: ReadonlyArray<readonly [SerializedInput, SerializedInput]>;
+  frames: ReadonlyArray<ReplayInputFrame>;
+  /** 2v2-only — set together with `playerCount: 4`. */
+  isPlayer3Computer?: boolean;
+  /** 2v2-only — set together with `playerCount: 4`. */
+  isPlayer4Computer?: boolean;
+  /** 2 (default) or 4. Omit / set to 2 for 1v1; set to 4 for 2v2. */
+  playerCount?: 2 | 4;
   roundReInits?: ReadonlyArray<RoundReInit>;
   finalScores?: readonly [number, number];
 }): Replay {
@@ -172,6 +223,14 @@ export function buildReplay(args: {
     isPlayer2Computer: args.isPlayer2Computer,
     frames: args.frames,
   };
+  if (args.playerCount === 4) {
+    replay = {
+      ...replay,
+      playerCount: 4,
+      isPlayer3Computer: args.isPlayer3Computer ?? true,
+      isPlayer4Computer: args.isPlayer4Computer ?? true,
+    };
+  }
   if (args.roundReInits !== undefined && args.roundReInits.length > 0) {
     replay = { ...replay, roundReInits: args.roundReInits };
   }

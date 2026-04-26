@@ -9,13 +9,73 @@ import {
   buildReplay,
   mulberry32,
   type Replay,
+  type ReplayInputFrame,
   type RoundReInit,
-  type SerializedInput,
   snapshotInputs,
 } from './replay.js';
 import { MenuView, GameView, FadeInOut, IntroView } from './view.js';
 import { PikaKeyboard } from './keyboard.js';
 import { PikaAudio } from './audio.js';
+import { localStorageWrapper } from './utils/local_storage_wrapper.js';
+
+export type GameMode = '1v1' | '2v2';
+
+/** Default key bindings for the two extra slots in 2v2. */
+const DEFAULT_KEYS_P3 = {
+  left: 'KeyJ',
+  right: 'KeyL',
+  up: 'KeyI',
+  down: 'KeyK',
+  powerHit: 'KeyU',
+} as const;
+const DEFAULT_KEYS_P4 = {
+  left: 'Numpad4',
+  right: 'Numpad6',
+  up: 'Numpad8',
+  down: 'Numpad2',
+  powerHit: 'Numpad0',
+} as const;
+
+function loadModeFromStorage(): GameMode {
+  return localStorageWrapper.get('pv-offline-mode') === '2v2' ? '2v2' : '1v1';
+}
+
+function makePhysicsForMode(mode: GameMode): PikaPhysics {
+  if (mode === '1v1') {
+    return new PikaPhysics(true, true);
+  }
+  return new PikaPhysics([
+    { isPlayer2: false, isComputer: true },
+    { isPlayer2: true, isComputer: true },
+    { isPlayer2: false, isComputer: true },
+    { isPlayer2: true, isComputer: true },
+  ]);
+}
+
+function makeKeyboardsForMode(mode: GameMode): [PikaKeyboard, PikaKeyboard, ...PikaKeyboard[]] {
+  const p1 = new PikaKeyboard('KeyD', 'KeyG', 'KeyR', 'KeyV', 'KeyZ', 'KeyF');
+  const p2 = new PikaKeyboard('ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Enter');
+  if (mode === '1v1') {
+    const r: [PikaKeyboard, PikaKeyboard] = [p1, p2];
+    return r;
+  }
+  const p3 = new PikaKeyboard(
+    DEFAULT_KEYS_P3.left,
+    DEFAULT_KEYS_P3.right,
+    DEFAULT_KEYS_P3.up,
+    DEFAULT_KEYS_P3.down,
+    DEFAULT_KEYS_P3.powerHit,
+  );
+  const p4 = new PikaKeyboard(
+    DEFAULT_KEYS_P4.left,
+    DEFAULT_KEYS_P4.right,
+    DEFAULT_KEYS_P4.up,
+    DEFAULT_KEYS_P4.down,
+    DEFAULT_KEYS_P4.powerHit,
+  );
+  const r: [PikaKeyboard, PikaKeyboard, PikaKeyboard, PikaKeyboard] = [p1, p2, p3, p4];
+  return r;
+}
 
 export type GameState = () => void;
 
@@ -51,7 +111,19 @@ export class PikachuVolleyball {
   view: PikaVolleyView;
   audio: PikaAudio;
   physics: PikaPhysics;
-  keyboardArray: [PikaKeyboard, PikaKeyboard];
+  /**
+   * Length 2 (1v1) or 4 (2v2). Tuple type pins indices [0]/[1] as guaranteed
+   * present so the menu / intro state machines can dot-access them without a
+   * non-null assertion.
+   */
+  keyboardArray: [PikaKeyboard, PikaKeyboard, ...PikaKeyboard[]];
+
+  /** '1v1' (2 players) or '2v2' (4 players). Persisted to localStorage. */
+  mode: GameMode = '1v1';
+
+  /** Stored so {@link setMode} can rebuild GameView without ui.ts plumbing. */
+  private readonly stage: Container;
+  private readonly sheet: Spritesheet;
 
   /** game fps */
   normalFPS = 25;
@@ -114,7 +186,7 @@ export class PikachuVolleyball {
    * recording is off. See {@link startRecording} / {@link stopRecording}.
    */
   private recordingSeed: number | null = null;
-  private recordingFrames: Array<readonly [SerializedInput, SerializedInput]> | null = null;
+  private recordingFrames: ReplayInputFrame[] | null = null;
   private recordingReInits: RoundReInit[] = [];
   /**
    * One-shot signal from {@link beforeStartOfNextRound}: the next recorded
@@ -128,7 +200,7 @@ export class PikachuVolleyball {
    * keyboardArray with the scripted input for the current frame. `null` means
    * not replaying. See {@link startReplay}.
    */
-  private replayFrames: ReadonlyArray<readonly [SerializedInput, SerializedInput]> | null = null;
+  private replayFrames: ReadonlyArray<ReplayInputFrame> | null = null;
   private replayCursor = 0;
 
   /** The game state which is being rendered now */
@@ -141,10 +213,16 @@ export class PikachuVolleyball {
    * @param sounds map keyed by sound URL → loaded `Sound`
    */
   constructor(stage: Container, sheet: Spritesheet, sounds: Record<string, Sound>) {
+    this.stage = stage;
+    this.sheet = sheet;
+    // Mode is read first so GameView's player-sprite count matches the
+    // PikaPhysics player count from the very first frame (no transient
+    // 1v1 view rendering 4-player physics).
+    this.mode = loadModeFromStorage();
     this.view = {
       intro: new IntroView(sheet),
       menu: new MenuView(sheet),
-      game: new GameView(sheet),
+      game: new GameView(sheet, this.mode === '2v2' ? 4 : 2),
       fadeInOut: new FadeInOut(sheet),
     };
     stage.addChild(this.view.intro.container);
@@ -157,20 +235,36 @@ export class PikachuVolleyball {
     this.view.fadeInOut.visible = false;
 
     this.audio = new PikaAudio(sounds);
-    this.physics = new PikaPhysics(true, true);
-    this.keyboardArray = [
-      new PikaKeyboard('KeyD', 'KeyG', 'KeyR', 'KeyV', 'KeyZ', 'KeyF'), // for player1
-      new PikaKeyboard(
-        // for player2
-        'ArrowLeft',
-        'ArrowRight',
-        'ArrowUp',
-        'ArrowDown',
-        'Enter',
-      ),
-    ];
+    this.physics = makePhysicsForMode(this.mode);
+    this.keyboardArray = makeKeyboardsForMode(this.mode);
 
     this.state = this.intro;
+  }
+
+  /**
+   * Switch between 1v1 and 2v2. Rebuilds physics, keyboards, and the game
+   * view's player sprites; unsubscribes old key listeners; resets state to
+   * intro so a half-played match doesn't leak into the new mode.
+   */
+  setMode(mode: GameMode): void {
+    if (this.mode === mode) return;
+    this.mode = mode;
+    localStorageWrapper.set('pv-offline-mode', mode);
+    for (const kb of this.keyboardArray) kb.unsubscribe();
+    this.physics = makePhysicsForMode(mode);
+    this.keyboardArray = makeKeyboardsForMode(mode);
+    // Rebuild GameView so its playerSprites array matches the new player
+    // count. Old game view is replaced wholesale; cleanest path given the
+    // sprite array is a constructor-time decision in view.ts.
+    this.stage.removeChild(this.view.game.container);
+    this.view.game = new GameView(this.sheet, mode === '2v2' ? 4 : 2);
+    // Re-insert at the same z-order: behind fadeInOut, in front of menu.
+    this.stage.addChildAt(
+      this.view.game.container,
+      this.stage.getChildIndex(this.view.fadeInOut.black),
+    );
+    this.view.game.visible = false;
+    this.restart();
   }
 
   /**
@@ -193,8 +287,7 @@ export class PikachuVolleyball {
       this.slowMotionNumOfSkippedFrames = 0;
     }
     // catch keyboard input and freeze it
-    this.keyboardArray[0].getInput();
-    this.keyboardArray[1].getInput();
+    for (const kb of this.keyboardArray) kb.getInput();
     this.state();
   }
 
@@ -270,15 +363,25 @@ export class PikachuVolleyball {
     }
 
     if (this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1) {
+      // Slot defaults follow the existing 1v1 menu UX, generalized:
+      //   "with friend" (selectedWithWho === 1):
+      //     1v1 → P1+P2 human; 2v2 → P1+P2 human, P3+P4 CPU teammates
+      //   "with computer" (selectedWithWho === 0):
+      //     human is whoever pressed power-hit; everyone else CPU
       if (this.selectedWithWho === 1) {
-        this.physics.player1.isComputer = false;
-        this.physics.player2.isComputer = false;
+        for (const p of this.physics.players) p.isComputer = false;
+        if (this.physics.players.length >= 4) {
+          // P3 and P4 are AI teammates — keep them CPU when picking "with friend"
+          for (let i = 2; i < this.physics.players.length; i++) {
+            const slot = this.physics.players[i];
+            if (slot !== undefined) slot.isComputer = true;
+          }
+        }
       } else {
+        for (const p of this.physics.players) p.isComputer = true;
         if (this.keyboardArray[0].powerHit === 1) {
           this.physics.player1.isComputer = false;
-          this.physics.player2.isComputer = true;
         } else if (this.keyboardArray[1].powerHit === 1) {
-          this.physics.player1.isComputer = true;
           this.physics.player2.isComputer = false;
         }
       }
@@ -290,8 +393,7 @@ export class PikachuVolleyball {
     }
 
     if (this.noInputFrameCounter >= this.noInputFrameTotal.menu) {
-      this.physics.player1.isComputer = true;
-      this.physics.player2.isComputer = true;
+      for (const p of this.physics.players) p.isComputer = true;
       this.frameCounter = 0;
       this.noInputFrameCounter = 0;
       this.state = this.afterMenuSelection;
@@ -330,17 +432,16 @@ export class PikachuVolleyball {
       this.gameEnded = false;
       this.roundEnded = false;
       this.isPlayer2Serve = false;
-      this.physics.player1.gameEnded = false;
-      this.physics.player1.isWinner = false;
-      this.physics.player2.gameEnded = false;
-      this.physics.player2.isWinner = false;
+      for (const p of this.physics.players) {
+        p.gameEnded = false;
+        p.isWinner = false;
+      }
 
       this.scores[0] = 0;
       this.scores[1] = 0;
       this.view.game.drawScoresToScoreBoards(this.scores);
 
-      this.physics.player1.initializeForNewRound();
-      this.physics.player2.initializeForNewRound();
+      for (const p of this.physics.players) p.initializeForNewRound();
       this.physics.ball.initializeForNewRound(this.isPlayer2Serve);
       this.view.game.drawPlayersAndBall(this.physics);
 
@@ -370,20 +471,19 @@ export class PikachuVolleyball {
       if (frame === undefined) {
         this.replayFrames = null; // exhausted — live keyboard takes over
       } else {
-        Object.assign(this.keyboardArray[0], frame[0]);
-        Object.assign(this.keyboardArray[1], frame[1]);
+        for (let i = 0; i < frame.length; i++) {
+          const kb = this.keyboardArray[i];
+          const slot = frame[i];
+          if (kb !== undefined && slot !== undefined) Object.assign(kb, slot);
+        }
         this.replayCursor++;
       }
     }
 
-    const pressedPowerHit =
-      this.keyboardArray[0].powerHit === 1 || this.keyboardArray[1].powerHit === 1;
+    const pressedPowerHit = this.keyboardArray.some((kb) => kb.powerHit === 1);
+    const allComputer = this.physics.players.every((p) => p.isComputer);
 
-    if (
-      this.physics.player1.isComputer === true &&
-      this.physics.player2.isComputer === true &&
-      pressedPowerHit
-    ) {
+    if (allComputer && pressedPowerHit) {
       this.frameCounter = 0;
       this.view.game.visible = false;
       this.state = this.intro;
@@ -427,25 +527,18 @@ export class PikachuVolleyball {
       this.roundEnded === false &&
       this.gameEnded === false
     ) {
-      if (this.physics.ball.punchEffectX < GROUND_HALF_WIDTH) {
-        this.isPlayer2Serve = true;
-        this.scores[1] += 1;
-        if (this.scores[1] >= this.winningScore) {
-          this.gameEnded = true;
-          this.physics.player1.isWinner = false;
-          this.physics.player2.isWinner = true;
-          this.physics.player1.gameEnded = true;
-          this.physics.player2.gameEnded = true;
-        }
-      } else {
-        this.isPlayer2Serve = false;
-        this.scores[0] += 1;
-        if (this.scores[0] >= this.winningScore) {
-          this.gameEnded = true;
-          this.physics.player1.isWinner = true;
-          this.physics.player2.isWinner = false;
-          this.physics.player1.gameEnded = true;
-          this.physics.player2.gameEnded = true;
+      // Ball landing on left half (x < net) → right team scores. The right
+      // team in 2v2 is every player with `isPlayer2 === true`.
+      const ballLandedLeft = this.physics.ball.punchEffectX < GROUND_HALF_WIDTH;
+      const winningTeamIsRight = ballLandedLeft;
+      const teamScoreIdx = winningTeamIsRight ? 1 : 0;
+      this.isPlayer2Serve = ballLandedLeft;
+      this.scores[teamScoreIdx] += 1;
+      if (this.scores[teamScoreIdx] >= this.winningScore) {
+        this.gameEnded = true;
+        for (const p of this.physics.players) {
+          p.isWinner = p.isPlayer2 === winningTeamIsRight;
+          p.gameEnded = true;
         }
       }
       this.view.game.drawScoresToScoreBoards(this.scores);
@@ -480,8 +573,7 @@ export class PikachuVolleyball {
       this.view.fadeInOut.setBlackAlphaTo(1);
       this.view.game.drawReadyMessage(false);
 
-      this.physics.player1.initializeForNewRound();
-      this.physics.player2.initializeForNewRound();
+      for (const p of this.physics.players) p.initializeForNewRound();
       this.physics.ball.initializeForNewRound(this.isPlayer2Serve);
       // Mark this reInit so the next recorded frame in `round()` pins it as a
       // multi-round boundary in the Replay artifact.
@@ -580,7 +672,17 @@ export class PikachuVolleyball {
    */
   startReplay(replay: Replay): void {
     setCustomRng(mulberry32(replay.seed));
-    this.physics = new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer);
+    const playerCount = replay.playerCount ?? 2;
+    if (playerCount === 2) {
+      this.physics = new PikaPhysics(replay.isPlayer1Computer, replay.isPlayer2Computer);
+    } else {
+      this.physics = new PikaPhysics([
+        { isPlayer2: false, isComputer: replay.isPlayer1Computer },
+        { isPlayer2: true, isComputer: replay.isPlayer2Computer },
+        { isPlayer2: false, isComputer: replay.isPlayer3Computer ?? true },
+        { isPlayer2: true, isComputer: replay.isPlayer4Computer ?? true },
+      ]);
+    }
     this.scores = [0, 0];
     this.gameEnded = false;
     this.roundEnded = false;
@@ -627,6 +729,13 @@ export class PikachuVolleyball {
       seed: this.recordingSeed,
       isPlayer1Computer: this.physics.player1.isComputer,
       isPlayer2Computer: this.physics.player2.isComputer,
+      ...(this.physics.players.length === 4
+        ? {
+            playerCount: 4 as const,
+            isPlayer3Computer: this.physics.players[2]?.isComputer ?? true,
+            isPlayer4Computer: this.physics.players[3]?.isComputer ?? true,
+          }
+        : {}),
       frames: [...this.recordingFrames],
       ...(this.recordingReInits.length > 0 ? { roundReInits: [...this.recordingReInits] } : {}),
       finalScores: [this.scores[0], this.scores[1]],
@@ -649,6 +758,13 @@ export class PikachuVolleyball {
       seed: this.recordingSeed,
       isPlayer1Computer: this.physics.player1.isComputer,
       isPlayer2Computer: this.physics.player2.isComputer,
+      ...(this.physics.players.length === 4
+        ? {
+            playerCount: 4 as const,
+            isPlayer3Computer: this.physics.players[2]?.isComputer ?? true,
+            isPlayer4Computer: this.physics.players[3]?.isComputer ?? true,
+          }
+        : {}),
       frames: this.recordingFrames,
       ...(this.recordingReInits.length > 0 ? { roundReInits: this.recordingReInits } : {}),
       finalScores: [this.scores[0], this.scores[1]],

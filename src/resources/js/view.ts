@@ -328,10 +328,16 @@ interface GameViewMessages {
 }
 
 interface GameViewShadows {
-  forPlayer1: Sprite;
-  forPlayer2: Sprite;
+  forPlayers: Sprite[];
   forBall: Sprite;
 }
+
+/**
+ * Tints applied per slot in 2v2. P1 / P2 stay default (white = no tint) so
+ * 1v1 looks identical. P3 / P4 get muted hues so two teammates on the same
+ * half-field can be told apart at a glance.
+ */
+const PLAYER_TINTS: ReadonlyArray<number> = [0xff_ff_ff, 0xff_ff_ff, 0x88_ff_aa, 0xff_aa_ee];
 
 interface ScoreBoardChildren {
   units: AnimatedSprite;
@@ -343,6 +349,14 @@ interface ScoreBoardChildren {
  */
 export class GameView {
   bgContainer: Container;
+  /**
+   * One sprite per player slot, indexed by physics player slot. Length 2
+   * (1v1) or 4 (2v2). The historical `player1` / `player2` fields are kept
+   * as references to `playerSprites[0]` / `playerSprites[1]` for ergonomics
+   * — they never go out of bounds and avoid plastering `playerSprites[0]!`
+   * across this file.
+   */
+  playerSprites: AnimatedSprite[];
   player1: AnimatedSprite;
   player2: AnimatedSprite;
   ball: AnimatedSprite;
@@ -361,20 +375,30 @@ export class GameView {
   cloudArray: Cloud[];
   wave: Wave;
 
-  constructor(sheet: Spritesheet) {
+  constructor(sheet: Spritesheet, playerCount: 2 | 4 = 2) {
     const textures = getSheetTextures(sheet);
 
     // Display objects below
     this.bgContainer = makeBGContainer(textures);
-    const playerSprites = makePlayerAnimatedSprites(textures);
-    this.player1 = playerSprites[0];
-    this.player2 = playerSprites[1];
+    this.playerSprites = makePlayerAnimatedSprites(textures, playerCount);
+    for (let i = 0; i < this.playerSprites.length; i++) {
+      const sprite = this.playerSprites[i];
+      const tint = PLAYER_TINTS[i];
+      if (sprite !== undefined && tint !== undefined) sprite.tint = tint;
+    }
+    const p1 = this.playerSprites[0];
+    const p2 = this.playerSprites[1];
+    if (p1 === undefined || p2 === undefined) {
+      throw new Error(`GameView: playerCount ${playerCount} must yield ≥ 2 sprites`);
+    }
+    this.player1 = p1;
+    this.player2 = p2;
     this.ball = makeBallAnimatedSprites(textures);
     this.ballHyper = makeSpriteWithAnchorXY(textures, TEXTURES.BALL_HYPER, 0.5, 0.5);
     this.ballTrail = makeSpriteWithAnchorXY(textures, TEXTURES.BALL_TRAIL, 0.5, 0.5);
     this.punch = makeSpriteWithAnchorXY(textures, TEXTURES.BALL_PUNCH, 0.5, 0.5);
 
-    // this.scoreBoards[0] for player1, this.scoreBoards[1] for player2
+    // this.scoreBoards[0] for left team, this.scoreBoards[1] for right team
     const board1 = makeScoreBoardSprite(textures);
     const board2 = makeScoreBoardSprite(textures);
     this.scoreBoards = [board1.container, board2.container];
@@ -383,9 +407,12 @@ export class GameView {
       { units: board2.units, tens: board2.tens },
     ];
 
+    const playerShadows: Sprite[] = [];
+    for (let i = 0; i < this.playerSprites.length; i++) {
+      playerShadows.push(makeSpriteWithAnchorXY(textures, TEXTURES.SHADOW, 0.5, 0.5));
+    }
     this.shadows = {
-      forPlayer1: makeSpriteWithAnchorXY(textures, TEXTURES.SHADOW, 0.5, 0.5),
-      forPlayer2: makeSpriteWithAnchorXY(textures, TEXTURES.SHADOW, 0.5, 0.5),
+      forPlayers: playerShadows,
       forBall: makeSpriteWithAnchorXY(textures, TEXTURES.SHADOW, 0.5, 0.5),
     };
 
@@ -409,11 +436,9 @@ export class GameView {
     this.container.addChild(this.bgContainer);
     this.container.addChild(this.cloudContainer);
     this.container.addChild(this.waveContainer);
-    this.container.addChild(this.shadows.forPlayer1);
-    this.container.addChild(this.shadows.forPlayer2);
+    for (const shadow of this.shadows.forPlayers) this.container.addChild(shadow);
     this.container.addChild(this.shadows.forBall);
-    this.container.addChild(this.player1);
-    this.container.addChild(this.player2);
+    for (const sprite of this.playerSprites) this.container.addChild(sprite);
     this.container.addChild(this.ballTrail);
     this.container.addChild(this.ballHyper);
     this.container.addChild(this.ball);
@@ -439,8 +464,7 @@ export class GameView {
     this.scoreBoards[1].x = 432 - 32 - 32 - 14; // 32 pixel is for number (32x32px) width; one score board has two numbers
     this.scoreBoards[1].y = 10;
 
-    this.shadows.forPlayer1.y = 273;
-    this.shadows.forPlayer2.y = 273;
+    for (const shadow of this.shadows.forPlayers) shadow.y = 273;
     this.shadows.forBall.y = 273;
 
     this.initializeVisibles();
@@ -478,32 +502,30 @@ export class GameView {
    * Draw players and ball in the given physics object
    */
   drawPlayersAndBall(physics: PikaPhysics): void {
-    const player1 = physics.player1;
-    const player2 = physics.player2;
     const ball = physics.ball;
 
-    this.player1.x = player1.x;
-    this.player1.y = player1.y;
-    if (player1.state === 3 || player1.state === 4) {
-      this.player1.scale.x = player1.divingDirection === -1 ? -1 : 1;
-    } else {
-      this.player1.scale.x = 1;
+    for (let i = 0; i < physics.players.length; i++) {
+      const player = physics.players[i];
+      const sprite = this.playerSprites[i];
+      const shadow = this.shadows.forPlayers[i];
+      if (player === undefined || sprite === undefined || shadow === undefined) continue;
+      sprite.x = player.x;
+      sprite.y = player.y;
+      // Mirror by team side normally; while diving / lying down, flip toward
+      // the direction of the dive (matches the original 1v1 behavior for
+      // each side).
+      if (player.state === 3 || player.state === 4) {
+        if (player.isPlayer2) {
+          sprite.scale.x = player.divingDirection === 1 ? 1 : -1;
+        } else {
+          sprite.scale.x = player.divingDirection === -1 ? -1 : 1;
+        }
+      } else {
+        sprite.scale.x = player.isPlayer2 ? -1 : 1;
+      }
+      shadow.x = player.x;
+      sprite.gotoAndStop(getFrameNumberForPlayerAnimatedSprite(player.state, player.frameNumber));
     }
-    this.shadows.forPlayer1.x = player1.x;
-
-    this.player2.x = player2.x;
-    this.player2.y = player2.y;
-    if (player2.state === 3 || player2.state === 4) {
-      this.player2.scale.x = player2.divingDirection === 1 ? 1 : -1;
-    } else {
-      this.player2.scale.x = -1;
-    }
-    this.shadows.forPlayer2.x = player2.x;
-
-    const frameNumber1 = getFrameNumberForPlayerAnimatedSprite(player1.state, player1.frameNumber);
-    const frameNumber2 = getFrameNumberForPlayerAnimatedSprite(player2.state, player2.frameNumber);
-    this.player1.gotoAndStop(frameNumber1);
-    this.player2.gotoAndStop(frameNumber2);
 
     this.ball.x = ball.x;
     this.ball.y = ball.y;
@@ -782,10 +804,11 @@ function makeBGContainer(textures: TextureDict): Container {
 }
 
 /**
- * Make animated sprites for both players
- * @return [0] for player 1, [1] for player2
+ * Make `count` animated sprites for player slots, all sharing one texture
+ * atlas. Slots 0/1 are P1/P2 (1v1 or 2v2), slots 2/3 are the second
+ * teammates in 2v2.
  */
-function makePlayerAnimatedSprites(textures: TextureDict): [AnimatedSprite, AnimatedSprite] {
+function makePlayerAnimatedSprites(textures: TextureDict, count: number): AnimatedSprite[] {
   const getPlayerTexture = (i: number, j: number): Texture =>
     getTexture(textures, TEXTURES.PIKACHU(i, j));
   const playerTextureArray: Texture[] = [];
@@ -801,15 +824,14 @@ function makePlayerAnimatedSprites(textures: TextureDict): [AnimatedSprite, Anim
       }
     }
   }
-  const player1AnimatedSprite = new AnimatedSprite(playerTextureArray, false);
-  const player2AnimatedSprite = new AnimatedSprite(playerTextureArray, false);
-
-  player1AnimatedSprite.anchor.x = 0.5;
-  player1AnimatedSprite.anchor.y = 0.5;
-  player2AnimatedSprite.anchor.x = 0.5;
-  player2AnimatedSprite.anchor.y = 0.5;
-
-  return [player1AnimatedSprite, player2AnimatedSprite];
+  const sprites: AnimatedSprite[] = [];
+  for (let i = 0; i < count; i++) {
+    const sprite = new AnimatedSprite(playerTextureArray, false);
+    sprite.anchor.x = 0.5;
+    sprite.anchor.y = 0.5;
+    sprites.push(sprite);
+  }
+  return sprites;
 }
 
 /**

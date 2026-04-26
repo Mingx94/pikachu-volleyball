@@ -56,6 +56,9 @@ export const translations: Record<Locale, TranslationTable> = {
     'options.practice_label': 'Practice mode' + ARROW,
     'options.practice_on': 'on',
     'options.practice_off': 'off',
+    'options.mode_label': 'Mode' + ARROW,
+    'options.mode_1v1': '1 vs 1',
+    'options.mode_2v2': '2 vs 2',
     'options.reset': 'Reset to default',
 
     // About / Play buttons
@@ -184,6 +187,9 @@ export const translations: Record<Locale, TranslationTable> = {
     'options.practice_label': '연습모드' + ARROW,
     'options.practice_on': '켜기',
     'options.practice_off': '끄기',
+    'options.mode_label': '모드' + ARROW,
+    'options.mode_1v1': '1대1',
+    'options.mode_2v2': '2대2',
     'options.reset': '설정 초기화',
 
     'btn.about': '게임 소개',
@@ -306,6 +312,9 @@ export const translations: Record<Locale, TranslationTable> = {
     'options.practice_label': '練習模式' + ARROW,
     'options.practice_on': '開',
     'options.practice_off': '關',
+    'options.mode_label': '模式' + ARROW,
+    'options.mode_1v1': '1對1',
+    'options.mode_2v2': '2對2',
     'options.reset': '恢復至預設值',
 
     'btn.about': '關於',

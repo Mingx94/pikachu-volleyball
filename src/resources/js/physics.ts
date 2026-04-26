@@ -81,32 +81,71 @@ export interface PhysicsTickResult {
 }
 
 /**
+ * Per-player config for {@link PikaPhysics}. `isPlayer2` selects which side
+ * of the net (and therefore which half-field clamp + sprite mirroring) the
+ * player belongs to; `isComputer` toggles AI control. In 2v2, two players
+ * share the same `isPlayer2` value (= teammates).
+ */
+export interface PlayerConfig {
+  isPlayer2: boolean;
+  isComputer: boolean;
+}
+
+/**
  * Class representing a pack of physical objects i.e. players and ball
  * whose physical values are calculated and set by {@link physicsEngine} function
+ *
+ * Supports either 2 players (1v1) or 4 players (2v2). In 2v2, players[0]/[2]
+ * are the left team, players[1]/[3] are the right team. The `player1` /
+ * `player2` accessors always refer to `players[0]` / `players[1]` so existing
+ * 1v1 callers (tests, replay, view) keep working unchanged.
  */
 export class PikaPhysics {
+  players: Player[];
   player1: Player;
   player2: Player;
   ball: Ball;
 
   /**
-   * Create a physics pack
-   * @param isPlayer1Computer Is player on the left (player 1) controlled by computer?
-   * @param isPlayer2Computer Is player on the right (player 2) controlled by computer?
+   * Create a physics pack.
+   *
+   * Two-arg form (legacy 1v1): `new PikaPhysics(isPlayer1Computer, isPlayer2Computer)`.
+   * Array form (1v1 or 2v2): `new PikaPhysics([{ isPlayer2, isComputer }, ...])` —
+   * length must be 2 or 4.
    */
-  constructor(isPlayer1Computer: boolean, isPlayer2Computer: boolean) {
-    this.player1 = new Player(false, isPlayer1Computer);
-    this.player2 = new Player(true, isPlayer2Computer);
+  constructor(isPlayer1Computer: boolean, isPlayer2Computer: boolean);
+  constructor(configs: ReadonlyArray<PlayerConfig>);
+  constructor(a: boolean | ReadonlyArray<PlayerConfig>, b?: boolean) {
+    let configs: ReadonlyArray<PlayerConfig>;
+    if (typeof a === 'boolean') {
+      configs = [
+        { isPlayer2: false, isComputer: a },
+        { isPlayer2: true, isComputer: b ?? false },
+      ];
+    } else {
+      configs = a;
+    }
+    if (configs.length !== 2 && configs.length !== 4) {
+      throw new Error(`Unsupported player count: ${configs.length}`);
+    }
+    this.players = configs.map((cfg) => new Player(cfg.isPlayer2, cfg.isComputer));
+    const p1 = this.players[0];
+    const p2 = this.players[1];
+    if (p1 === undefined || p2 === undefined) {
+      throw new Error('unreachable: players[0]/[1] missing after length check');
+    }
+    this.player1 = p1;
+    this.player2 = p2;
     this.ball = new Ball(false);
   }
 
   /**
    * run {@link physicsEngine} function with this physics object and user input
    *
-   * @param userInputArray userInputArray[0]: PikaUserInput object for player 1, userInputArray[1]: PikaUserInput object for player 2
+   * @param userInputArray one {@link PikaUserInput} per player, indexed by slot
    */
   runEngineForNextFrame(userInputArray: PikaUserInput[]): PhysicsTickResult {
-    return physicsEngine(this.player1, this.player2, this.ball, userInputArray);
+    return physicsEngine(this.players, this.ball, userInputArray);
   }
 }
 
@@ -143,6 +182,21 @@ export class Player {
   lyingDownDurationLeft = -1; // 0xB8
   isWinner = false; // 0xD0
   gameEnded = false; // 0xD4
+
+  /**
+   * 2v2-only: a teammate is currently standing on this player's head.
+   * Set by {@link processPlayerToPlayerCollisions} each tick; consumed by the
+   * jump guard to lock this player out of jumping. Always false in 1v1.
+   */
+  hasPlayerOnHead = false;
+  /**
+   * 2v2-only: this player is currently standing on a teammate's head (so
+   * their y is clamped above the field's natural ground). Set by
+   * {@link processPlayerToPlayerCollisions} each tick; consumed by the jump
+   * guard so the player can re-jump from on top of a teammate. Always false
+   * in 1v1.
+   */
+  standingOnTeammate = false;
 
   /**
    * It flips randomly to 0 or 1 by the {@link letComputerDecideUserInput} function (FUN_00402360)
@@ -218,6 +272,9 @@ export class Player {
     this.delayBeforeNextFrame = 0; // 0xCC  // initialized to 0
 
     this.computerBoldness = rand() % 5; // 0xD8  // initialized to (_rand() % 5)
+
+    this.hasPlayerOnHead = false;
+    this.standingOnTeammate = false;
   }
 }
 
@@ -295,30 +352,27 @@ export class Ball {
  * This is the Pikachu Volleyball physics engine!
  * This physics engine calculates and set the physics values for the next frame.
  *
- * @param player1 player on the left side
- * @param player2 player on the right side
+ * Generalized to N players (2 = 1v1, 4 = 2v2). Slot order is fixed:
+ * `userInputArray[i]` belongs to `players[i]`. Iteration order is the slot
+ * order, so determinism (and golden snapshots) survive: when two teammates'
+ * AABBs overlap the ball on the same tick, the lower-index slot's hit lands
+ * first.
+ *
+ * @param players players in fixed slot order
  * @param ball ball
- * @param userInputArray userInputArray[0]: user input for player 1, userInputArray[1]: user input for player 2
+ * @param userInputArray one PikaUserInput per slot
  */
 function physicsEngine(
-  player1: Player,
-  player2: Player,
+  players: Player[],
   ball: Ball,
   userInputArray: PikaUserInput[],
 ): PhysicsTickResult {
   const sounds: SoundEvent[] = [];
   const isBallTouchingGround = processCollisionBetweenBallAndWorldAndSetBallPosition(ball, sounds);
 
-  let player: Player;
-  let theOtherPlayer: Player;
-  for (let i = 0; i < 2; i++) {
-    if (i === 0) {
-      player = player1;
-      theOtherPlayer = player2;
-    } else {
-      player = player2;
-      theOtherPlayer = player1;
-    }
+  for (let i = 0; i < players.length; i++) {
+    const player = players[i];
+    if (player === undefined) continue;
 
     // FUN_00402d90 omitted
     // FUN_00402810 omitted
@@ -329,6 +383,7 @@ function physicsEngine(
 
     const userInput = userInputArray[i];
     if (userInput === undefined) continue;
+    const theOtherPlayer = findNearestOpponent(player, players, ball);
     processPlayerMovementAndSetPlayerPosition(player, userInput, theOtherPlayer, ball, sounds);
 
     // FUN_00402830 omitted
@@ -336,12 +391,13 @@ function physicsEngine(
     // These two functions omitted above maybe participate in graphic drawing for a player
   }
 
-  for (let i = 0; i < 2; i++) {
-    if (i === 0) {
-      player = player1;
-    } else {
-      player = player2;
-    }
+  // 2v2 teammate collision: stack-on-head and horizontal push. No-op in 1v1
+  // because there are no same-team pairs.
+  processPlayerToPlayerCollisions(players);
+
+  for (let i = 0; i < players.length; i++) {
+    const player = players[i];
+    if (player === undefined) continue;
 
     // FUN_00402810 omitted: this javascript code is refactored not to need this function
 
@@ -364,6 +420,128 @@ function physicsEngine(
   // These two functions omitted above maybe participate in graphic drawing for a player
 
   return { isBallTouchingGround, sounds };
+}
+
+/**
+ * Pick the opponent (player on the other team / opposite `isPlayer2`) closest
+ * to the ball. Used as `theOtherPlayer` for AI input decisions. In 1v1 there
+ * is exactly one opponent, so this is a no-op vs. the hardcoded pairing. In
+ * 2v2 it lets each AI react to whichever opponent is most likely to act on
+ * the ball next.
+ *
+ * Falls back to the player itself if no opponent is found (defensive — never
+ * hits in supported 2-player or 4-player configs).
+ */
+function findNearestOpponent(player: Player, players: Player[], ball: Ball): Player {
+  let nearest: Player = player;
+  let minDist = Infinity;
+  for (const p of players) {
+    if (p === player || p.isPlayer2 === player.isPlayer2) continue;
+    const d = Math.abs(p.x - ball.x);
+    if (d < minDist) {
+      minDist = d;
+      nearest = p;
+    }
+  }
+  return nearest;
+}
+
+/**
+ * 2v2 teammate collision pass. Resolves each same-team pair by AABB:
+ * - If the players' boxes overlap and the y-overlap is smaller than the
+ *   x-overlap, treat it as a vertical stack: the upper player snaps to
+ *   `lower.y - PLAYER_LENGTH`, their downward y-velocity is killed, and
+ *   their state collapses to grounded (state 0; or state 4 if they were
+ *   diving). The lower player is flagged `hasPlayerOnHead = true` so the
+ *   next-frame jump guard locks them out, and the upper player is flagged
+ *   `standingOnTeammate = true` so the jump guard accepts their non-244 y
+ *   as a valid jump origin.
+ * - Otherwise (horizontal contact dominant), push the pair apart by the
+ *   x-overlap split in half, and re-clamp each one to their own half-field.
+ *
+ * Flags are reset to false at the top of every call so they reflect *this*
+ * tick only — a player who walks off a teammate's head naturally falls.
+ *
+ * No-op in 1v1: with one player per team there are no same-team pairs.
+ */
+function processPlayerToPlayerCollisions(players: Player[]): void {
+  for (const p of players) {
+    p.hasPlayerOnHead = false;
+    p.standingOnTeammate = false;
+  }
+  for (let i = 0; i < players.length; i++) {
+    const a = players[i];
+    if (a === undefined) continue;
+    for (let j = i + 1; j < players.length; j++) {
+      const b = players[j];
+      if (b === undefined) continue;
+      if (a.isPlayer2 !== b.isPlayer2) continue; // only same-team pairs
+      resolveTeammatePair(a, b);
+    }
+  }
+}
+
+function resolveTeammatePair(a: Player, b: Player): void {
+  const dx = a.x - b.x;
+  const dy = a.y - b.y;
+  const overlapX = PLAYER_LENGTH - Math.abs(dx);
+  const overlapY = PLAYER_LENGTH - Math.abs(dy);
+  // `< 0` (not `<= 0`): when a player rests on a teammate's head, gravity
+  // every tick gives futurePlayerY += 1 followed by yVel += 1 — so the
+  // stable state has |dy| = PLAYER_LENGTH exactly (overlapY = 0). We still
+  // want the resolve to fire there to keep the stack glued and the flag set.
+  if (overlapX < 0 || overlapY < 0) return;
+
+  if (overlapY < overlapX) {
+    // vertical resolution: the higher (smaller y) one stacks on the lower
+    const top = dy < 0 ? a : b;
+    const bot = dy < 0 ? b : a;
+    top.y = bot.y - PLAYER_LENGTH;
+    if (top.yVelocity > 0) {
+      top.yVelocity = 0;
+      if (top.state === 1 || top.state === 2) {
+        // jumping / power-hitting → grounded on teammate's head
+        top.state = 0;
+        top.frameNumber = 0;
+      } else if (top.state === 3) {
+        // diving onto teammate's head → lying-down (consistent with state 3→4)
+        top.state = 4;
+        top.frameNumber = 0;
+        top.lyingDownDurationLeft = 3;
+      }
+    }
+    top.standingOnTeammate = true;
+    bot.hasPlayerOnHead = true;
+  } else {
+    // horizontal resolution: push apart by half the overlap each
+    const half = (overlapX / 2) | 0;
+    const sign = dx >= 0 ? 1 : -1;
+    a.x += half * sign;
+    b.x -= half * sign;
+    clampPlayerToFieldSide(a);
+    clampPlayerToFieldSide(b);
+  }
+}
+
+/**
+ * Clamp a player's x to their own half-field. Mirrors the inline clamp in
+ * {@link processPlayerMovementAndSetPlayerPosition} so a horizontal push
+ * cannot move a player across the net or out of the world.
+ */
+function clampPlayerToFieldSide(player: Player): void {
+  if (player.isPlayer2 === false) {
+    if (player.x < PLAYER_HALF_LENGTH) {
+      player.x = PLAYER_HALF_LENGTH;
+    } else if (player.x > GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH) {
+      player.x = GROUND_HALF_WIDTH - PLAYER_HALF_LENGTH;
+    }
+  } else {
+    if (player.x < GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH) {
+      player.x = GROUND_HALF_WIDTH + PLAYER_HALF_LENGTH;
+    } else if (player.x > GROUND_WIDTH - PLAYER_HALF_LENGTH) {
+      player.x = GROUND_WIDTH - PLAYER_HALF_LENGTH;
+    }
+  }
 }
 
 /**
@@ -540,10 +718,15 @@ function processPlayerMovementAndSetPlayerPosition(
   }
 
   // jump
+  // Standard ground check: y === PLAYER_TOUCHING_GROUND_Y_COORD.
+  // 2v2 extension: also allowed from a teammate's head (standingOnTeammate),
+  //   and blocked while a teammate is on this player's head (hasPlayerOnHead).
+  // Both flags are always false in 1v1 → the original gate is preserved.
   if (
     player.state < 3 &&
     userInput.yDirection === -1 && // up-direction input
-    player.y === PLAYER_TOUCHING_GROUND_Y_COORD // player is touching on the ground
+    !player.hasPlayerOnHead &&
+    (player.y === PLAYER_TOUCHING_GROUND_Y_COORD || player.standingOnTeammate)
   ) {
     player.yVelocity = -16;
     player.state = 1;
