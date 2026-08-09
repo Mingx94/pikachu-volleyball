@@ -8,6 +8,10 @@ You can play this game on the website: https://gorisanson.github.io/pikachu-voll
 
 <img src="src/resources/assets/images/screenshot.png" alt="Pikachu Volleyball game screenshot" width="648">
 
+## Documentation
+
+- [繁體中文文件](docs/README.md)
+
 ## How to run locally
 
 1. Clone this repository and get into the directory.
